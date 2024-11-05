@@ -1,0 +1,14 @@
+{
+  "python.poetryPath": "/Users/ik/Library/Caches/pypoetry/virtualenvs/kwento-backend-eZvEQlbz-py3.11",
+  "python.defaultInterpreterPath": "/Users/ik/Library/Caches/pypoetry/virtualenvs/kwento-backend-eZvEQlbz-py3.11",
+  "editor.formatOnSave": true,
+  "python.languageServer": "Pylance",
+  "editor.defaultFormatter": "ms-python.black-formatter",
+  "python.linting.pylintEnabled": true,
+  "python.linting.enabled": true,
+  "python.linting.flake8Enabled": true,
+  "python.analysis.extraPaths": ["${workspaceFolder}/backend"],
+  "terminal.integrated.env.osx": {
+    "PYTHONPATH": "${workspaceFolder}/backend"
+  }
+}
