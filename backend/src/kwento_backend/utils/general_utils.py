@@ -41,7 +41,7 @@ def get_target_directory(relative_path: str) -> Path:
 
 def save_file(file_name: str, content: str, relative_path: str = "local_data") -> Path:
     """
-    Saves a file with given content to a target directory within the project.
+    Saves a text file with given content to a target directory within the project.
 
     Parameters:
     - file_name: The name of the file to save.
@@ -58,30 +58,34 @@ def save_file(file_name: str, content: str, relative_path: str = "local_data") -
     file_path = target_dir / file_name
 
     # Write content to the file
-    with open(file_path, "w") as f:
+    with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
     return file_path
 
 
-if __name__ == "__main__":
-    # titles = [
-    #     "Fuzzy's Spectactular Adventure",
-    #     "Gulliver's Travels",
-    #     "The Wormtongue Bible",
-    #     "Alien 3",
-    #     "Fight Club",
-    #     "The Spectacular Now",
-    #     "X-Men: Apocalypse",
-    # ]
-    # for t in titles:
-    #     print(f"{t} --> {book_title_normalize(t)}")
+def save_binary_file(
+    file_name: str, content: bytes, relative_path: str = "local_data"
+) -> Path:
+    """
+    Saves a binary file with given content to a target directory within the project.
 
-    # Example content and filename
-    file_name = "sample_output2.txt"
-    content = "This is a sample output to be saved in local_data."
+    Parameters:
+    - file_name: The name of the file to save.
+    - content: The binary content to write into the file.
+    - relative_path: Relative path to the target directory within the project.
 
-    # Call save_file function to save in "local_data"
-    file_path = save_file(file_name, content, relative_path="local_data")
+    Returns:
+    - Path: The path to the saved file.
+    """
+    # Get or create the target directory
+    target_dir = get_target_directory(relative_path)
 
-    print(f"File saved at: {file_path}")
+    # Define the full file path
+    file_path = target_dir / file_name
+
+    # Write binary content to the file
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    return file_path
