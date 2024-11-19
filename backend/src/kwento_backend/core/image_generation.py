@@ -5,12 +5,14 @@ import logging
 from typing import Dict, Any
 import base64
 from pathlib import Path
+import copy
 
 from kwento_backend.services import openai_service, image_service
 from kwento_backend.api.models.book_models import Page
 from kwento_backend.core.prompts import prompts as pt
 from kwento_backend.utils.book_utils import book_title_normalize
 from kwento_backend.utils.general_utils import get_project_root, save_file
+from kwento_backend.api.models.helpers import remove_book_model_relationships
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,7 @@ async def generate_single_page_illustration(
         filename = f"{page.page_number}.png"
 
         # Define the relative filepath for saving
-        relative_filepath = f"{book_title_normalize(page.book_parent.book_title, append_datetime=False)}/images/{filename}"
+        relative_filepath = f"local_data/{book_title_normalize(page.book_parent.book_title, append_datetime=False)}/images/{filename}"
 
         # Save the image using the image_service
         saved_path = image_service.save_image(
@@ -107,11 +109,12 @@ async def generate_page_illustrations(
     # Save the book JSON if saving locally
     if save_where == "local":
         book_json_path = book_dir / "book.json"
-        book_json_content = json.dumps(
-            book.to_dict(), indent=4
-        )  # Assuming book has to_dict()
+
+        # make a copy of the book, strip its relational data, dump it to json, and save it
+        book_copy_no_refs = remove_book_model_relationships(copy.deepcopy(book))
+        book_json_content = book_copy_no_refs.json(indent=4)
         save_file(
-            "book.json",
+            f"{book_normalized}.json",
             book_json_content,
             relative_path=str(book_dir.relative_to(project_root)),
         )

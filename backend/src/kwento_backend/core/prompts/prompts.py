@@ -434,9 +434,13 @@ ILLUSTRATION_STYLE_ATTRIBUTES = [
         "Detail Level": "Moderate",
     },
 ]
-PROMPT_PAGE_ILLUSTRATION_PREFACE = "Create an illustration for children's book according to the following specification (follow the specification *EXACTLY*):"
+PROMPT_PAGE_ILLUSTRATION_PREFACE = """Create an illustration for children's book according to the following specification (follow the specification *EXACTLY*):"""
 PROMPT_PAGE_ILLUSTRATION_BODY = {
-    "SYSTEM_NOTE": "*NEVER* depict text in the generated image. Additionally, know that you are not creating an image of the act of illustration, nor an illustration in a book. You are creating an illustration to be placed in a book.",
+    "SYSTEM_NOTES": {
+        "1": "*NEVER* depict text in the generated image.",
+        "2": "You are *NOT* creating an image of the act of illustration, nor an illustration in a book. You are creating an illustration to be placed in a book.",
+        "3": "Characters *MUST* be in action. *NOT* staring at each other or the reader.",
+    },
     "illustration_description": None,  # text description of the page's illustration
     "illustration_style": {
         "Dimensionality/Depth": None,
