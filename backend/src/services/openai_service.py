@@ -21,7 +21,7 @@ from PIL import Image
 import io
 from fastapi import HTTPException
 
-from kwento_backend.config import settings
+from config import settings
 
 # initialize logger for this module
 logger = logging.getLogger(__name__)

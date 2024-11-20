@@ -1,7 +1,7 @@
 # backend/src/kwento_backend/services/image_service.py
 import logging
 
-from kwento_backend.utils.general_utils import save_binary_file
+from utils.general_utils import save_binary_file
 
 logger = logging.getLogger(__name__)
 

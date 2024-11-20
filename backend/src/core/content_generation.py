@@ -5,11 +5,11 @@ import random
 import logging
 from typing import Dict, Any
 
-from kwento_backend.services import openai_service
-from kwento_backend.api.models.book_models import Book
-from kwento_backend.api.models.helpers import assign_book_model_relationships
-from kwento_backend.core.prompts import prompts as pt
-from kwento_backend.core.image_generation import generate_page_illustrations
+from services import openai_service
+from api.models.book_models import Book
+from api.models.helpers import assign_book_model_relationships
+from core.prompts import prompts as pt
+from core.image_generation import generate_page_illustrations
 
 logger = logging.getLogger(__name__)
 

@@ -7,12 +7,12 @@ import base64
 from pathlib import Path
 import copy
 
-from kwento_backend.services import openai_service, image_service
-from kwento_backend.api.models.book_models import Page
-from kwento_backend.core.prompts import prompts as pt
-from kwento_backend.utils.book_utils import book_title_normalize
-from kwento_backend.utils.general_utils import get_project_root, save_file
-from kwento_backend.api.models.helpers import remove_book_model_relationships
+from services import openai_service, image_service
+from api.models.book_models import Page
+from core.prompts import prompts as pt
+from utils.book_utils import book_title_normalize
+from utils.general_utils import get_project_root, save_file
+from api.models.helpers import remove_book_model_relationships
 
 logger = logging.getLogger(__name__)
 

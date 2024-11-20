@@ -6,7 +6,7 @@ logging.basicConfig(level=logging.INFO)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from kwento_backend.api.routers import books
+from api.routers import books
 
 app = FastAPI(title="Kwento API", version="1.0.0")
 

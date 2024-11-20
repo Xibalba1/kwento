@@ -6,8 +6,8 @@ from pydantic import BaseModel
 from typing import List
 import logging
 
-from kwento_backend.api.models.book_models import Book
-from kwento_backend.core import content_generation
+from api.models.book_models import Book
+from core import content_generation
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
