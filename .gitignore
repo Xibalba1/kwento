@@ -41,7 +41,9 @@ packages/react-devtools-timeline/dist
 test_scratch.py
 test_scratch_2.py
 backend/local_data/*
+backend/.vscode
 kwento.zip
+backend/test_scratch_3.py
 
 # vs code
 *launch.json*
