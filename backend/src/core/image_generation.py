@@ -106,20 +106,6 @@ async def generate_page_illustrations(
         book_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created directory for book at {book_dir}")
 
-    # Save the book JSON if saving locally
-    if save_where == "local":
-        book_json_path = book_dir / "book.json"
-
-        # make a copy of the book, strip its relational data, dump it to json, and save it
-        book_copy_no_refs = remove_book_model_relationships(copy.deepcopy(book))
-        book_json_content = book_copy_no_refs.json(indent=4)
-        save_file(
-            f"{book_normalized}.json",
-            book_json_content,
-            relative_path=str(book_dir.relative_to(project_root)),
-        )
-        logger.info(f"Saved book JSON at {book_json_path}")
-
     # Define the images directory
     images_dir = book_dir / "images"
 
@@ -140,5 +126,19 @@ async def generate_page_illustrations(
         )
         illustrations[page.page_number] = image_data
         logger.info(f"Generated illustration for page {page.page_number}")
+
+    # Save the book JSON if saving locally
+    if save_where == "local":
+        book_json_path = book_dir / "book.json"
+
+        # make a copy of the book, strip its relational data, dump it to json, and save it
+        book_copy_no_refs = remove_book_model_relationships(copy.deepcopy(book))
+        book_json_content = book_copy_no_refs.json(indent=4)
+        save_file(
+            f"{book_normalized}.json",
+            book_json_content,
+            relative_path=str(book_dir.relative_to(project_root)),
+        )
+        logger.info(f"Saved book JSON at {book_json_path}")
 
     return illustrations

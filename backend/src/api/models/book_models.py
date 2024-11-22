@@ -1,5 +1,5 @@
 """
-book_models.py
+backend/src/api/models/book_models.py
 ==============
 
 This module defines the data models for the Kwento backend API, representing the core
@@ -73,6 +73,7 @@ from __future__ import annotations
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, validator
 import logging
+from uuid import UUID, uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ class PageContent(BaseModel):
     illustration_prompt_system_revised: Optional[str] = None
     illustration: Optional[str] = None  # Path to the saved image
     illustration_image: Optional[bytes] = None  # Image bytes if needed
-    illustration_b64_data: Optional[str] = None  # Base64 image data
+    illustration_b64_data: Optional[str] = None  # Base64 image data string
 
     def assign_page_parent(self, page_parent: Page) -> None:
         """
@@ -210,6 +211,7 @@ class Book(BaseModel):
     Represents a book.
 
     Attributes:
+        book_id (UUID): unique identifier of the book.
         book_title (str): The title of the book.
         book_length_n_pages (int): The number of pages in the book.
         characters (List[Character]): List of characters in the book.
@@ -218,6 +220,7 @@ class Book(BaseModel):
         illustration_style (Optional[str]): The illustration style of the book.
     """
 
+    book_id: UUID = Field(default_factory=uuid4)
     book_title: str
     book_length_n_pages: int
     characters: List[Character] = Field(default_factory=list)
@@ -308,6 +311,49 @@ class Book(BaseModel):
         page.remove_book_parent()
         self.pages.remove(page)
         logger.info(f"Removed page {page_number} from book '{self.book_title}'.")
+
+
+class PageContentResponse(BaseModel):
+    """
+    Represents the content of a single page.
+
+    Attributes:
+        text_content_of_this_page (str): Displayed text content of a single page.
+        illustration_b64_data (str): B64 BSON string representing a .png image.
+        characters_in_this_page (List[str]): List of characters present in this page.
+    """
+
+    text_content_of_this_page: str
+    illustration_b64_data: str
+    characters_in_this_page: List[str]
+
+
+class PageResponse(BaseModel):
+    """
+    Represents a page response.
+
+    Attributes:
+        page_number (int): Page number of the page.
+        content (PageContentResponse): Content of this page. See `PageContentResponse`.
+    """
+
+    page_number: int
+    content: PageContentResponse
+
+
+class BookResponseModel(BaseModel):
+    """
+    Represents a book response.
+
+    Attributes:
+        book_id (UUID): Unique identifier of the book in the response.
+        title (str): Title of the book in the response.
+        pages (List[PageResponse]): pages of the book in the response.
+    """
+
+    book_id: UUID
+    title: str
+    pages: List[PageResponse]
 
 
 # Add the following lines to resolve forward references
