@@ -274,8 +274,11 @@ async def list_books():
             books_list.append(
                 {"book_id": str(book_data["book_id"]), "title": book_data["book_title"]}
             )
-
-        return books_list
+        # sort the books by title, alphabetically
+        # assumed to be O(nlog⁡n)O(nlogn) for time and O(n) for space
+        # (could be dangerous!)
+        sorted_books = sorted(books_list, key=lambda x: x["title"])
+        return sorted_books
 
     except Exception as e:
         logger.exception(f"Unexpected error listing books: {e}")
