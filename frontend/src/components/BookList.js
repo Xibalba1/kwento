@@ -1,6 +1,8 @@
+// kwento/frontend/src/components/BookList.js
+
 import React, { useEffect, useState } from 'react';
 
-const BookList = ({ onSelectBook }) => {
+const BookList = ({ onSelectBook, onClose }) => {
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -29,72 +31,161 @@ const BookList = ({ onSelectBook }) => {
   }, []);
 
   if (loading) {
-    return <p style={styles.message}>Loading books...</p>;
+    return (
+      <div style={styles.overlay}>
+        <div style={styles.modal}>
+          <button
+            onClick={onClose}
+            style={styles.closeButton}
+            aria-label="Close Modal"
+          >
+            &#10005;
+          </button>
+          <p style={styles.message}>Loading books...</p>
+        </div>
+      </div>
+    );
   }
 
   if (error) {
-    return <p style={styles.message}>Error fetching books. Please try again later.</p>;
-  }
-
-  if (books.length === 0) {
-    return <p style={styles.message}>No books available.</p>;
+    return (
+      <div style={styles.overlay}>
+        <div style={styles.modal}>
+          <button
+            onClick={onClose}
+            style={styles.closeButton}
+            aria-label="Close Modal"
+          >
+            &#10005;
+          </button>
+          <p style={styles.message}>Error fetching books. Please try again later.</p>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div style={styles.listContainer}>
-      <h2>Available Books</h2>
-      <ul style={styles.list}>
-        {books.map((book) => (
-          <li key={book.book_id} style={styles.listItem}>
-            <button
-            style={styles.button}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#3700B3')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#6200EE')}
-            onClick={() => onSelectBook(book.book_id)}
-            >
-            {book.title}
-            </button>
-          </li>
-        ))}
-      </ul>
+    <div style={styles.overlay}>
+      <div style={styles.modal}>
+        {/* Close Button */}
+        <button
+          onClick={onClose}
+          style={styles.closeButton}
+          aria-label="Close Modal"
+        >
+          &#10005; {/* Unicode for "X" */}
+        </button>
+
+        {/* Modal Title */}
+        <h2 style={styles.title}>My Library</h2>
+
+        {/* Book List */}
+        <ul style={styles.list}>
+          {books.map((book) => (
+            <li key={book.book_id} style={styles.listItem}>
+              <button
+                style={styles.bookButton}
+                onClick={() => {
+                  onSelectBook(book.book_id);
+                  onClose(); // Close the BookList modal after selection
+                }}
+              >
+                <span style={styles.bookIcon} role="img" aria-label="Book">
+                  📚
+                </span>
+                <span style={styles.bookTitle}>{book.title}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 };
 
 const styles = {
-    listContainer: {
-      textAlign: 'center',
-      marginTop: '20px',
-    },
-    list: {
-      listStyleType: 'none',
-      padding: 0,
-      margin: '0 auto',
-      maxWidth: '400px',
-    },
-    listItem: {
-      marginBottom: '10px',
-    },
-    button: {
-      width: '100%',
-      padding: '15px',
-      fontSize: '18px',
-      color: '#fff',
-      backgroundColor: '#6200EE',
-      border: 'none',
-      borderRadius: '8px',
-      cursor: 'pointer',
-      textAlign: 'left',
-      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-      transition: 'background-color 0.2s ease',
-    },
-    buttonHover: {
-      backgroundColor: '#3700B3',
-    },
-    message: {
-      textAlign: 'center',
-      marginTop: '20px',
-    },
-  };
-  
+  overlay: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    width: "100vw",
+    height: "100vh",
+    backgroundColor: "rgba(0, 0, 0, 0.6)", // Semi-transparent background
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 1000, // Ensure the modal is on top
+    overflowY: "auto",
+    padding: "20px",
+  },
+  modal: {
+    position: "relative",
+    width: "90%", // Occupies most vertical area
+    maxWidth: "600px", // Adjust as needed for horizontal space
+    backgroundColor: "#fff",
+    borderRadius: "10px",
+    padding: "30px",
+    boxShadow: "0 5px 15px rgba(0,0,0,0.3)",
+    display: "flex",
+    flexDirection: "column",
+    maxHeight: "90vh",
+  },
+  closeButton: {
+    position: "absolute",
+    top: "15px",
+    right: "15px",
+    background: "transparent",
+    border: "none",
+    fontSize: "24px",
+    cursor: "pointer",
+    color: "#333",
+  },
+  title: {
+    marginBottom: "20px",
+    textAlign: "center",
+    fontSize: "24px",
+    color: "#6200EE",
+  },
+  list: {
+    listStyleType: "none",
+    padding: 0,
+    margin: 0,
+    flexGrow: 1,
+    overflowY: "auto",
+  },
+  listItem: {
+    marginBottom: "15px",
+  },
+  bookButton: {
+    display: "flex",
+    alignItems: "center",
+    width: "100%",
+    padding: "10px 15px",
+    backgroundColor: "#f5f5f5",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+    transition: "background-color 0.2s",
+    textAlign: "left",
+  },
+  bookButtonHover: {
+    backgroundColor: "#e0e0e0",
+  },
+  bookIcon: {
+    marginRight: "10px",
+    fontSize: "24px",
+  },
+  bookTitle: {
+    fontSize: "18px",
+    color: "#333",
+    wordBreak: "break-word",
+    maxWidth: "80%", // Ensures wrapping for long titles
+  },
+  message: {
+    textAlign: "center",
+    fontSize: "18px",
+    color: "#555",
+  },
+};
+
 export default BookList;

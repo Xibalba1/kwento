@@ -3,14 +3,13 @@
 import React, { useState } from "react";
 import ThemeInput from "./components/ThemeInput";
 import BookModal from "./components/BookModal";
-import BookList from './components/BookList';
 
 const App = () => {
   const [theme, setTheme] = useState("");
   const [book, setBook] = useState(null);
   const [loading, setLoading] = useState(false);
   const [existingBookLoading, setExistingBookLoading] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false); // State to control modal visibility
+  const [isModalOpen, setIsModalOpen] = useState(false); // State to control BookModal visibility
 
   // Handler to generate a new book based on the theme
   const handleGenerateBook = async () => {
@@ -33,7 +32,7 @@ const App = () => {
       }
       const data = await response.json();
       setBook(data);
-      setIsModalOpen(true); // Open the modal with the new book
+      setIsModalOpen(true); // Open the BookModal with the new book
     } catch (error) {
       console.error(error);
       setBook(null);
@@ -58,7 +57,7 @@ const App = () => {
       }
       const data = await response.json();
       setBook(data);
-      setIsModalOpen(true); // Open the modal with the fetched book
+      setIsModalOpen(true); // Open the BookModal with the fetched book
     } catch (error) {
       console.error(error);
       setBook(null);
@@ -68,32 +67,32 @@ const App = () => {
     }
   };
 
-  // Handler to close the modal
+  // Handler to close the BookModal
   const handleCloseModal = () => {
     setIsModalOpen(false);
-    setBook(null); // Optional: Reset the book state
+    setBook(null); // Reset the book state
   };
 
-  // Handler to fetch a book by ID
+  // Handler to fetch a book by ID (triggered from BookList modal)
   const handleSelectBook = async (bookId) => {
     setExistingBookLoading(true);
     setBook(null);
 
     try {
       const response = await fetch(`http://localhost:8000/books/${bookId}/`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
       });
       if (!response.ok) {
-        throw new Error('Failed to fetch the selected book');
+        throw new Error("Failed to fetch the selected book");
       }
       const data = await response.json();
       setBook(data);
-      setIsModalOpen(true); // Open the modal with the fetched book
+      setIsModalOpen(true); // Open the BookModal with the fetched book
     } catch (error) {
       console.error(error);
       setBook(null);
-      alert('Error fetching the book. Please try again.');
+      alert("Error fetching the book. Please try again.");
     } finally {
       setExistingBookLoading(false);
     }
@@ -107,11 +106,9 @@ const App = () => {
         setTheme={setTheme}
         onSubmit={handleGenerateBook}
         loading={loading}
+        onSelectBook={handleSelectBook} // Pass the handler to ThemeInput
       />
-  
-      {/* Add the BookList component */}
-      <BookList onSelectBook={handleSelectBook} />
-  
+
       {/* Render the BookModal if a book is selected and modal is open */}
       {isModalOpen && book && <BookModal book={book} onClose={handleCloseModal} />}
     </div>
