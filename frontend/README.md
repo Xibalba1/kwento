@@ -1,12 +1,3 @@
-## TO DOs
-
-- Overall App
-  - Improve error messages and handling in both frontend and backend.
-- Available Books
-  - Pagination: If there are many books, consider adding pagination to the book list.
-  - Search Functionality: Add a search bar to filter books by title.
-  - UI Libraries: Integrate a UI library for a more polished look and feel.
-
 ## Getting Started with Create React App (React Boilerplate Stuff)
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
