@@ -67,7 +67,7 @@ async def generate_single_page_illustration(
             image_data, relative_filepath, save_where=save_where
         )
 
-        page.content.illustration = saved_path
+        page.content.illustration = saved_path  # saved_path is now a URL or path
         page.content.illustration_b64_data = image_b64
 
         return {"image_data": image_b64}

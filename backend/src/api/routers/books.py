@@ -7,11 +7,12 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 
 from api.models.book_models import Book
 from core import content_generation
+from utils.general_utils import write_json_file, read_json_file
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ class PageResponse(BaseModel):
     page_number: int
     text_content: str
     illustration_b64_data: str
+    illustration: Optional[str] = None  # Add this field
     characters: List[str]
 
 
@@ -47,13 +49,13 @@ async def create_book(book_request: BookCreateRequest):
         )
 
         response = BookResponse(
-            book_id=str(id(book)),  # Ensuring book_id is a string
+            book_id=str(book.book_id),
             title=book.book_title,
             pages=[
                 PageResponse(
                     page_number=page.page_number,
                     text_content=page.content.text_content_of_this_page,
-                    illustration_b64_data=page.content.illustration_b64_data,
+                    illustration=page.content.illustration,  # Include the illustration URL or path
                     characters=page.content.characters_in_this_page,
                 )
                 for page in book.pages
@@ -119,16 +121,26 @@ async def get_random_book():
         logger.debug(f"Book JSON path: {book_json_path}")
 
         # Read the JSON file
-        with open(book_json_path, "r", encoding="utf-8") as f:
-            try:
-                book_data = json.load(f)
-                logger.debug(f"Successfully loaded JSON data from {book_json_path}")
-            except json.JSONDecodeError as jde:
-                logger.error(f"JSON decode error for file {book_json_path}: {jde}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Invalid JSON format in book file: {book_json_path}",
-                )
+        try:
+            book_data = read_json_file(book_json_path, "books")
+            logger.debug(f"Successfully loaded JSON data from {book_json_path}")
+        except Exception as e:
+            logger.error(f"JSON decode error for file {book_json_path}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Invalid JSON format in book file: {book_json_path}",
+            )
+        # TODO: deprecated, remove following block
+        # with open(book_json_path, "r", encoding="utf-8") as f:
+        #     try:
+        #         book_data = json.load(f)
+        #         logger.debug(f"Successfully loaded JSON data from {book_json_path}")
+        #     except json.JSONDecodeError as jde:
+        #         logger.error(f"JSON decode error for file {book_json_path}: {jde}")
+        #         raise HTTPException(
+        #             status_code=500,
+        #             detail=f"Invalid JSON format in book file: {book_json_path}",
+        #         )
 
         # Validate required fields
         required_fields = ["book_title", "pages"]
@@ -141,14 +153,14 @@ async def get_random_book():
                 )
 
         # Assign a UUID if not present
-        if "book_id" not in book_data:
-            book_data["book_id"] = str(uuid4())  # Assign a new UUID as a string
-            # Save the updated JSON back to the file
-            with open(book_json_path, "w", encoding="utf-8") as f:
-                json.dump(book_data, f, indent=4)
-            logger.info(
-                f"Assigned new UUID to book '{book_data['book_title']}' and updated JSON file."
-            )
+        # if "book_id" not in book_data:
+        #     book_data["book_id"] = str(uuid4())  # Assign a new UUID as a string
+        #     # Save the updated JSON back to the file
+        #     with open(book_json_path, "w", encoding="utf-8") as f:
+        #         json.dump(book_data, f, indent=4)
+        #     logger.info(
+        #         f"Assigned new UUID to book '{book_data['book_title']}' and updated JSON file."
+        #     )
 
         # Parse the JSON data into the Book model for validation
         try:
@@ -252,24 +264,31 @@ async def list_books():
             book_json_path = json_files[0]
 
             # Read the JSON file
-            with open(book_json_path, "r", encoding="utf-8") as f:
-                try:
-                    book_data = json.load(f)
-                except json.JSONDecodeError as jde:
-                    logger.error(f"JSON decode error for file {book_json_path}: {jde}")
-                    continue  # Skip this book
+            try:
+                book_data = read_json_file(book_json_path, "books")
+            except Exception as e:
+                logger.error(f"Error loading JSON for {book_json_path}: {e}")
+
+            # TODO: deprecated, remove after testing
+            # with open(book_json_path, "r", encoding="utf-8") as f:
+            #     try:
+            #         book_data = json.load(f)
+            #     except json.JSONDecodeError as jde:
+            #         logger.error(f"JSON decode error for file {book_json_path}: {jde}")
+            #         continue  # Skip this book
 
             # Validate required fields
             if "book_title" not in book_data:
                 continue  # Skip if title is missing
 
+            # TODO: deprecated, delete after testing:
             # Assign a UUID if not present
-            if "book_id" not in book_data:
-                book_data["book_id"] = str(uuid4())
-                # Save the updated JSON back to the file
-                with open(book_json_path, "w", encoding="utf-8") as f_out:
-                    json.dump(book_data, f_out, indent=4)
-                logger.info(f"Assigned new UUID to book '{book_data['book_title']}'.")
+            # if "book_id" not in book_data:
+            #     book_data["book_id"] = str(uuid4())
+            #     # Save the updated JSON back to the file
+            #     with open(book_json_path, "w", encoding="utf-8") as f_out:
+            #         json.dump(book_data, f_out, indent=4)
+            #     logger.info(f"Assigned new UUID to book '{book_data['book_title']}'.")
 
             books_list.append(
                 {"book_id": str(book_data["book_id"]), "title": book_data["book_title"]}
@@ -311,12 +330,18 @@ async def get_book_by_id(book_id: str):
                 continue
             book_json_path = json_files[0]
 
-            with open(book_json_path, "r", encoding="utf-8") as f:
-                try:
-                    book_data = json.load(f)
-                except json.JSONDecodeError as jde:
-                    logger.error(f"JSON decode error for file {book_json_path}: {jde}")
-                    continue
+            try:
+                book_data = read_json_file(book_json_path, "books")
+            except Exception as e:
+                logger.error(f"Error reading JSON for file {book_json_path}: {e}")
+
+            # TODO: deprecated, delete after testing:
+            # with open(book_json_path, "r", encoding="utf-8") as f:
+            #     try:
+            #         book_data = json.load(f)
+            #     except json.JSONDecodeError as jde:
+            #         logger.error(f"JSON decode error for file {book_json_path}: {jde}")
+            #         continue
 
             if str(book_data.get("book_id", "")) == book_id:
                 # Parse the book data

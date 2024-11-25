@@ -1,27 +1,45 @@
-# backend/src/kwento_backend/services/image_service.py
-import logging
+# backend/src/services/image_service.py
 
-from utils.general_utils import save_binary_file
+import logging
+from typing import Optional
+
+from utils.general_utils import (
+    save_binary_file,
+    save_binary_file_to_gcs,
+    get_gcs_file_url,
+)
+from config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def save_image_to_cloud(image_data: bytes, filename: str) -> str:
+def save_image_to_cloud(image_data: bytes, relative_filepath: str) -> str:
     """
-    Save image data to the cloud. (Stub implementation)
+    Save image data to Google Cloud Storage.
 
     Args:
         image_data (bytes): The binary data of the image.
-        filename (str): The name of the file to be saved in the cloud.
+        relative_filepath (str): The path within the bucket where the image will be saved.
 
     Returns:
-        str: A stub URL representing the cloud location.
+        str: The public HTTP URL where the image was saved.
     """
-    logger.info("save_image_to_cloud called, but cloud saving is not implemented yet.")
-    print(f"image data: {image_data[:100]}...")
-    print(f"filename: {filename}...")
-    # TODO: Implement cloud saving logic
-    return "cloud_url_stub"
+    try:
+        blob_name = save_binary_file_to_gcs(
+            file_name=relative_filepath.split("/")[-1],
+            content=image_data,
+            relative_path="/".join(relative_filepath.split("/")[:-1]) or "",
+        )
+        logger.info(f"Saved image to GCS at {blob_name}")
+
+        # Use get_gcs_file_url to get the public HTTP URL
+        public_url = get_gcs_file_url(blob_name)
+        logger.info(f"Public URL for the image: {public_url}")
+
+        return public_url
+    except Exception as e:
+        logger.error(f"Error saving image to cloud: {e}")
+        raise
 
 
 def save_image_locally(image_data: bytes, relative_filepath: str) -> str:
@@ -50,7 +68,7 @@ def save_image_locally(image_data: bytes, relative_filepath: str) -> str:
 
 
 def save_image(
-    image_data: bytes, relative_filepath: str, save_where: str = "local"
+    image_data: bytes, relative_filepath: str, save_where: Optional[str] = None
 ) -> str:
     """
     Save image data either locally or to the cloud based on the save_where parameter.
@@ -58,11 +76,14 @@ def save_image(
     Args:
         image_data (bytes): The binary data of the image.
         relative_filepath (str): The relative path (from project root) or filename where the image will be saved.
-        save_where (str): Destination to save the image. Options: "local", "cloud".
+        save_where (str, optional): Destination to save the image. Options: "local", "cloud".
 
     Returns:
         str: The path or URL where the image was saved.
     """
+    if save_where is None:
+        save_where = "cloud" if settings.use_cloud_storage else "local"
+
     if save_where == "local":
         return save_image_locally(image_data, relative_filepath)
     elif save_where == "cloud":

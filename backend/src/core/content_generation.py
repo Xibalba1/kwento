@@ -4,7 +4,6 @@ import json
 import random
 import logging
 from typing import Dict, Any
-
 from services import openai_service
 from api.models.book_models import Book
 from api.models.helpers import assign_book_model_relationships

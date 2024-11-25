@@ -7,32 +7,6 @@ entities involved in managing books, their pages, characters, and associated con
 Utilizing Pydantic's `BaseModel`, the module ensures data validation, type checking,
 and provides utility methods for managing relationships between different entities.
 
-Classes:
-    - Character: Represents a character within a book, detailing their name, description,
-      and appearance.
-    - PageContent: Encapsulates the content of a single page, including textual content,
-      illustrations, and the characters present on that page. It also manages the relationship
-      to its parent `Page`.
-    - Page: Represents an individual page in a book, containing `PageContent` and referencing
-      its parent `Book`. It includes methods to assign or remove its parent `Book`.
-    - Book: Represents a complete book, comprising multiple `Page` instances, a list of
-      `Character` instances, and additional metadata such as title, synopsis, and illustration
-      style. It provides methods to add or remove pages while maintaining data integrity.
-
-Key Features:
-    - **Data Validation**: Ensures that all fields adhere to the expected types and constraints
-      using Pydantic validators. For example, page numbers and book lengths are validated to
-      be positive integers.
-    - **Relationship Management**: Provides methods to assign and remove parent relationships
-      between `PageContent` and `Page`, as well as between `Page` and `Book`, ensuring referential
-      integrity.
-    - **Logging**: Implements detailed logging for operations such as assignments, additions,
-      removals, and validation errors. This facilitates easier debugging and monitoring of
-      the application's behavior.
-    - **Error Handling**: Incorporates comprehensive error and exception handling to manage
-      invalid data inputs and operational errors gracefully, raising appropriate exceptions
-      and logging error messages.
-
 Usage:
     The models defined in this module are intended to be used as part of the Kwento backend
     API for managing book-related data. They can be instantiated, validated, and manipulated
@@ -99,7 +73,7 @@ class PageContent(BaseModel):
 
     Attributes:
         text_content_of_this_page (str): The textual content of the page.
-        illustration (str): The illustration associated with the page.
+        illustration (Optional[str]): The URL or path to the saved image.
         characters_in_this_page (List[str]): List of character names appearing on the page.
         illustration_prompt (Optional[str]): Prompt for the illustration.
         illustration_prompt_system_revised (Optional[str]): Revised system prompt for the illustration.
@@ -113,20 +87,16 @@ class PageContent(BaseModel):
     characters_in_this_page_data: Optional[List[Character]] = None
     illustration_prompt: Optional[str] = None
     illustration_prompt_system_revised: Optional[str] = None
-    illustration: Optional[str] = None  # Path to the saved image
-    illustration_image: Optional[bytes] = None  # Image bytes if needed
-    illustration_b64_data: Optional[str] = None  # Base64 image data string
+    illustration: Optional[str] = None  # URL or path to the saved image
+    # Remove or deprecate the following if not needed
+    illustration_image: Optional[bytes] = (
+        None  # Deprecated: Use illustration URL instead
+    )
+    illustration_b64_data: Optional[str] = (
+        None  # Deprecated: Use illustration URL instead
+    )
 
     def assign_page_parent(self, page_parent: Page) -> None:
-        """
-        Assigns a parent Page to this PageContent.
-
-        Args:
-            page_parent (Page): The parent Page to assign.
-
-        Raises:
-            TypeError: If page_parent is not an instance of Page.
-        """
         if not isinstance(page_parent, Page):
             logger.error("Attempted to assign a non-Page instance as page_parent.")
             raise TypeError("page_parent must be an instance of Page.")
@@ -134,9 +104,6 @@ class PageContent(BaseModel):
         logger.info(f"Assigned page_parent {page_parent.page_number} to PageContent.")
 
     def remove_page_parent(self) -> None:
-        """
-        Removes the parent Page from this PageContent.
-        """
         if self.page_parent:
             logger.info(
                 f"Removing page_parent {self.page_parent.page_number} from PageContent."
@@ -145,29 +112,11 @@ class PageContent(BaseModel):
 
 
 class Page(BaseModel):
-    """
-    Represents a single page in a book.
-
-    Attributes:
-        page_number (int): The number of the page in the book.
-        content (PageContent): The content of the page.
-        book_parent (Optional[Book]): Reference to the parent Book.
-    """
-
     page_number: int
     content: PageContent
     book_parent: Optional[Book] = Field(default=None, exclude=True)
 
     def assign_book_parent(self, book_parent: Book) -> None:
-        """
-        Assigns a parent Book to this Page.
-
-        Args:
-            book_parent (Book): The parent Book to assign.
-
-        Raises:
-            TypeError: If book_parent is not an instance of Book.
-        """
         if not isinstance(book_parent, Book):
             logger.error("Attempted to assign a non-Book instance as book_parent.")
             raise TypeError("book_parent must be an instance of Book.")
@@ -177,9 +126,6 @@ class Page(BaseModel):
         )
 
     def remove_book_parent(self) -> None:
-        """
-        Removes the parent Book from this Page.
-        """
         if self.book_parent:
             logger.info(
                 f"Removing book_parent '{self.book_parent.book_title}' from Page {self.page_number}."
@@ -188,18 +134,6 @@ class Page(BaseModel):
 
     @validator("page_number")
     def validate_page_number(cls, v: int) -> int:
-        """
-        Validates that the page number is positive.
-
-        Args:
-            v (int): The page number.
-
-        Raises:
-            ValueError: If the page number is not positive.
-
-        Returns:
-            int: The validated page number.
-        """
         if v <= 0:
             logger.error("Page number must be positive.")
             raise ValueError("page_number must be a positive integer.")
@@ -207,19 +141,6 @@ class Page(BaseModel):
 
 
 class Book(BaseModel):
-    """
-    Represents a book.
-
-    Attributes:
-        book_id (UUID): unique identifier of the book.
-        book_title (str): The title of the book.
-        book_length_n_pages (int): The number of pages in the book.
-        characters (List[Character]): List of characters in the book.
-        plot_synopsis (str): The plot synopsis of the book.
-        pages (List[Page]): List of pages in the book.
-        illustration_style (Optional[str]): The illustration style of the book.
-    """
-
     book_id: UUID = Field(default_factory=uuid4)
     book_title: str
     book_length_n_pages: int
@@ -230,18 +151,6 @@ class Book(BaseModel):
 
     @validator("book_length_n_pages")
     def validate_book_length(cls, v: int) -> int:
-        """
-        Validates that book_length_n_pages is positive.
-
-        Args:
-            v (int): The number of pages.
-
-        Raises:
-            ValueError: If the number of pages is not positive.
-
-        Returns:
-            int: The validated number of pages.
-        """
         if v <= 0:
             logger.error("book_length_n_pages must be positive.")
             raise ValueError("book_length_n_pages must be a positive integer.")
@@ -249,19 +158,6 @@ class Book(BaseModel):
 
     @validator("pages", each_item=True)
     def validate_pages(cls, page: Page, values: dict) -> Page:
-        """
-        Ensures that each page's book_parent is assigned to this book.
-
-        Args:
-            page (Page): The page being validated.
-            values (dict): The other fields of the model.
-
-        Raises:
-            ValueError: If book_parent of the page does not match this book.
-
-        Returns:
-            Page: The validated page.
-        """
         if (
             "book_title" in values
             and page.book_parent
@@ -272,16 +168,6 @@ class Book(BaseModel):
         return page
 
     def add_page(self, page: Page) -> None:
-        """
-        Adds a page to the book.
-
-        Args:
-            page (Page): The page to add.
-
-        Raises:
-            TypeError: If page is not an instance of Page.
-            ValueError: If adding the page exceeds book_length_n_pages.
-        """
         if not isinstance(page, Page):
             logger.error("Attempted to add a non-Page instance to book.")
             raise TypeError("page must be an instance of Page.")
@@ -293,15 +179,6 @@ class Book(BaseModel):
         logger.info(f"Added page {page.page_number} to book '{self.book_title}'.")
 
     def remove_page(self, page_number: int) -> None:
-        """
-        Removes a page from the book by its page number.
-
-        Args:
-            page_number (int): The number of the page to remove.
-
-        Raises:
-            ValueError: If the page_number does not exist in the book.
-        """
         page = next((p for p in self.pages if p.page_number == page_number), None)
         if not page:
             logger.error(
@@ -313,44 +190,15 @@ class Book(BaseModel):
         logger.info(f"Removed page {page_number} from book '{self.book_title}'.")
 
 
-class PageContentResponse(BaseModel):
-    """
-    Represents the content of a single page.
-
-    Attributes:
-        text_content_of_this_page (str): Displayed text content of a single page.
-        illustration_b64_data (str): B64 BSON string representing a .png image.
-        characters_in_this_page (List[str]): List of characters present in this page.
-    """
-
-    text_content_of_this_page: str
-    illustration_b64_data: str
-    characters_in_this_page: List[str]
-
-
+# Update the response models accordingly
 class PageResponse(BaseModel):
-    """
-    Represents a page response.
-
-    Attributes:
-        page_number (int): Page number of the page.
-        content (PageContentResponse): Content of this page. See `PageContentResponse`.
-    """
-
     page_number: int
-    content: PageContentResponse
+    text_content: str
+    illustration: Optional[str] = None  # Include the illustration URL
+    characters: List[str]
 
 
 class BookResponseModel(BaseModel):
-    """
-    Represents a book response.
-
-    Attributes:
-        book_id (UUID): Unique identifier of the book in the response.
-        title (str): Title of the book in the response.
-        pages (List[PageResponse]): pages of the book in the response.
-    """
-
     book_id: UUID
     title: str
     pages: List[PageResponse]
