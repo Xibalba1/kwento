@@ -1,7 +1,8 @@
-# backend/src/kwento_backend/main.py
+# backend/src/main.py
 import logging
+from config import settings
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=settings.logging_level)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

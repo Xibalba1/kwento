@@ -42,6 +42,8 @@ Example:
     ```
 """
 
+# backend/src/api/models/book_models.py
+
 from __future__ import annotations
 
 from typing import List, Optional, Dict, Any
@@ -148,6 +150,11 @@ class Book(BaseModel):
     plot_synopsis: str
     pages: List[Page] = Field(default_factory=list)
     illustration_style: Optional[Dict[str, Any]] = None
+
+    class Config:
+        json_encoders = {
+            UUID: lambda v: str(v),
+        }
 
     @validator("book_length_n_pages")
     def validate_book_length(cls, v: int) -> int:

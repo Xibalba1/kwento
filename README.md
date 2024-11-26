@@ -5,6 +5,7 @@
 - Improve error messages and handling in both frontend and backend.
 - Add authentication
   - Very simple, just to secure app from exploitation while building it
+- Change image format to WebP
 
 ### Front End
 

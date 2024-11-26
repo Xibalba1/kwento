@@ -7,6 +7,7 @@ from utils.general_utils import (
     save_binary_file,
     save_binary_file_to_gcs,
     get_gcs_file_url,
+    construct_storage_path,
 )
 from config import settings
 
@@ -28,8 +29,9 @@ def save_image_to_cloud(image_data: bytes, relative_filepath: str) -> str:
         blob_name = save_binary_file_to_gcs(
             file_name=relative_filepath.split("/")[-1],
             content=image_data,
-            relative_path="/".join(relative_filepath.split("/")[:-1]) or "",
+            relative_path="/".join(relative_filepath.split("/")[:-1]),
         )
+
         logger.info(f"Saved image to GCS at {blob_name}")
 
         # Use get_gcs_file_url to get the public HTTP URL

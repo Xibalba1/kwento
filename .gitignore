@@ -38,11 +38,12 @@ packages/react-devtools-shell/dist
 packages/react-devtools-timeline/dist
 
 # project
-test_scratch.py
-test_scratch_2.py
 backend/local_data/*
 backend/.vscode
 kwento.zip
+backend.zip
+*test_scratch*
+secrets
 backend/test_scratch_3.py
 
 # vs code

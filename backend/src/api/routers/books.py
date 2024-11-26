@@ -1,7 +1,6 @@
 # backend/src/api/routers/books.py
 
 import random
-import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,7 +11,7 @@ import logging
 
 from api.models.book_models import Book
 from core import content_generation
-from utils.general_utils import write_json_file, read_json_file
+from utils.general_utils import read_json_file
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

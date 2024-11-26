@@ -1,17 +1,21 @@
-# backend/src/kwento_backend/core/image_generation.py
+# backend/src/core/image_generation.py
 
 import json
 import logging
 from typing import Dict, Any
 import base64
-from pathlib import Path
 import copy
 
+from config import settings
 from services import openai_service, image_service
 from api.models.book_models import Page
 from core.prompts import prompts as pt
 from utils.book_utils import book_title_normalize
-from utils.general_utils import get_project_root, save_file
+from utils.general_utils import (
+    ensure_directory_exists,
+    write_json_file,
+    construct_storage_path,
+)
 from api.models.helpers import remove_book_model_relationships
 
 logger = logging.getLogger(__name__)
@@ -34,40 +38,30 @@ def make_illustration_prompt(page: Page) -> str:
 
 
 async def generate_single_page_illustration(
-    page: Page, illustration_prompt: str, images_dir: Path, save_where: str = "local"
+    page: Page, illustration_prompt: str, images_dir: str
 ) -> Dict[str, Any]:
     """
     Generates an illustration for a single page and saves the image.
-
-    Args:
-        page (Page): The page object for which to generate the illustration.
-        illustration_prompt (str): The prompt to generate the illustration.
-        images_dir (Path): The directory where images should be saved.
-        save_where (str): Destination to save the image. Options: "local", "cloud".
-
-    Returns:
-        Dict[str, Any]: Dictionary containing image data.
     """
     try:
         page.content.illustration_prompt = illustration_prompt
 
+        # Generate the image using OpenAI service
         response = await openai_service.generate_image(illustration_prompt)
         image_b64 = response.data[0].b64_json
 
+        # Decode base64 image data
         image_data = base64.b64decode(image_b64)
 
-        # Define the image filename
+        # Construct a normalized filename and path
         filename = f"{page.page_number}.png"
+        relative_filepath = f"{images_dir}/{filename}"
 
-        # Define the relative filepath for saving
-        relative_filepath = f"local_data/{book_title_normalize(page.book_parent.book_title, append_datetime=False)}/images/{filename}"
+        # Save the image
+        saved_path = image_service.save_image(image_data, relative_filepath)
 
-        # Save the image using the image_service
-        saved_path = image_service.save_image(
-            image_data, relative_filepath, save_where=save_where
-        )
-
-        page.content.illustration = saved_path  # saved_path is now a URL or path
+        # Update page content
+        page.content.illustration = saved_path
         page.content.illustration_b64_data = image_b64
 
         return {"image_data": image_b64}
@@ -76,69 +70,43 @@ async def generate_single_page_illustration(
         raise
 
 
-async def generate_page_illustrations(
-    book, save_where: str = "local"
-) -> Dict[int, Any]:
+async def generate_page_illustrations(book) -> Dict[int, Any]:
     """
     Generates illustrations for all pages in a book and saves them appropriately.
-
-    Args:
-        book: The book object containing pages and metadata.
-        save_where (str): Destination to save the images and JSON. Options: "local", "cloud".
-
-    Returns:
-        Dict[int, Any]: Dictionary mapping page numbers to their image data.
     """
     illustrations = {}
     logger.info(f"Generating illustrations for the book '{book.book_title}'")
 
-    # Normalize the book title without appending datetime for consistent directory naming
+    # Normalize the book title for consistent naming
     book_normalized = book_title_normalize(book.book_title, append_datetime=False)
+    logger.debug(f"Normalized book title: {book_normalized}")
 
-    # Get the project root
-    project_root = get_project_root()
+    # Construct paths using the utility function
+    book_dir = construct_storage_path(book_normalized)
+    images_dir = construct_storage_path(f"{book_normalized}/images")
 
-    # Define the base directory for this book
-    book_dir = project_root / "local_data" / book_normalized
+    logger.debug(f"Constructed book_dir: {book_dir}")
+    logger.debug(f"Constructed images_dir: {images_dir}")
 
-    # Create the book directory if saving locally
-    if save_where == "local":
-        book_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created directory for book at {book_dir}")
+    # Ensure directories exist
+    if not settings.use_cloud_storage:
+        ensure_directory_exists(book_dir)
+        ensure_directory_exists(images_dir)
+    logger.info(f"Directories ensured for book '{book.book_title}'")
 
-    # Define the images directory
-    images_dir = book_dir / "images"
-
-    # Create the images directory if saving locally
-    if save_where == "local":
-        images_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created images directory at {images_dir}")
-
+    # Generate illustrations for each page
     for page in book.pages:
         illustration_prompt = make_illustration_prompt(page)
         image_data = await generate_single_page_illustration(
-            page,
-            illustration_prompt,
-            (
-                images_dir if save_where == "local" else project_root
-            ),  # Pass images_dir only if saving locally
-            save_where=save_where,
+            page, illustration_prompt, images_dir
         )
         illustrations[page.page_number] = image_data
         logger.info(f"Generated illustration for page {page.page_number}")
 
-    # Save the book JSON if saving locally
-    if save_where == "local":
-        book_json_path = book_dir / "book.json"
-
-        # make a copy of the book, strip its relational data, dump it to json, and save it
-        book_copy_no_refs = remove_book_model_relationships(copy.deepcopy(book))
-        book_json_content = book_copy_no_refs.json(indent=4)
-        save_file(
-            f"{book_normalized}.json",
-            book_json_content,
-            relative_path=str(book_dir.relative_to(project_root)),
-        )
-        logger.info(f"Saved book JSON at {book_json_path}")
+    # Save book JSON at the root of book_dir
+    book_copy_no_refs = remove_book_model_relationships(copy.deepcopy(book))
+    book_data = book_copy_no_refs.dict()
+    write_json_file(f"{book_normalized}.json", book_data, relative_path=book_dir)
+    logger.info(f"Saved book JSON for '{book.book_title}'")
 
     return illustrations

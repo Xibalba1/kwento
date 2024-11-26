@@ -1,121 +1,82 @@
-import os
-import json
-from jsonschema import validate, ValidationError
+from google.cloud import storage
+from google.oauth2 import service_account
 
-# Define the JSON schema
-schema = {
-    "type": "object",
-    "properties": {
-        "book_id": {"type": "string"},
-        "book_title": {"type": "string"},
-        "book_length_n_pages": {"type": "integer"},
-        "characters": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "description": {"type": "string"},
-                    "appearance": {"type": "string"},
-                },
-                "required": ["name", "description", "appearance"],
-            },
-        },
-        "plot_synopsis": {"type": "string"},
-        "pages": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "page_number": {"type": "integer"},
-                    "content": {
-                        "type": "object",
-                        "properties": {
-                            "text_content_of_this_page": {"type": "string"},
-                            "illustration_b64_data": {"type": "string"},
-                            "characters_in_this_page": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                        },
-                        "required": [
-                            "text_content_of_this_page",
-                            "illustration_b64_data",
-                            "characters_in_this_page",
-                        ],
-                    },
-                },
-                "required": ["page_number", "content"],
-            },
-        },
-    },
-    "required": [
-        "book_id",
-        "book_title",
-        "book_length_n_pages",
-        "characters",
-        "plot_synopsis",
-        "pages",
-    ],
-}
+# Constants
+SERVICE_ACCOUNT_FILE = "/Users/ik/repos/kwento/secrets/kwento-88cf359a16d5.json"  # Replace with the path to your JSON credential file
+BUCKET_NAME = "kwento-books"  # Replace with the name of your bucket
 
 
-def validate_json_file(file_path):
+def check_bucket_access():
+    """Check if the service account can confirm that the bucket exists. If it fails, list all accessible buckets."""
     try:
-        with open(file_path, "r") as file:
-            data = json.load(file)
-        validate(instance=data, schema=schema)
-        return True, None
-    except ValidationError as e:
-        return False, str(e)
-    except json.JSONDecodeError as e:
-        return False, f"Invalid JSON format: {e}"
+        # Create credentials and initialize the storage client
+        credentials = service_account.Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_FILE
+        )
+        client = storage.Client(credentials=credentials)
+
+        # Try to get the bucket
+        bucket = client.get_bucket(BUCKET_NAME)
+        print(f"Bucket '{bucket.name}' exists and is accessible.")
+        return True
+    except Exception as e:
+        print(f"Failed to access the bucket '{BUCKET_NAME}': {e}")
+        print("Attempting to list all available buckets...")
+        try:
+            # List all accessible buckets
+            buckets = client.list_buckets()
+            bucket_names = [bucket.name for bucket in buckets]
+            if bucket_names:
+                print("Accessible buckets:")
+                for name in bucket_names:
+                    print(f"- {name}")
+            else:
+                print("No accessible buckets found.")
+        except Exception as list_error:
+            print(f"Failed to list buckets: {list_error}")
+        return False
 
 
-def main(directory):
-    results = []
-    for subdir, _, files in os.walk(directory):
-        json_files = [f for f in files if f.endswith(".json")]
-        if len(json_files) == 1:  # Ensure only one JSON file in the subdir
-            json_file_path = os.path.join(subdir, json_files[0])
-            is_valid, error = validate_json_file(json_file_path)
-            results.append(
-                {
-                    "subdirectory": subdir,
-                    "file": json_files[0],
-                    "status": "Valid" if is_valid else "Invalid",
-                    "error": error,
-                }
-            )
-        elif len(json_files) > 1:
-            results.append(
-                {
-                    "subdirectory": subdir,
-                    "file": None,
-                    "status": "Error",
-                    "error": "Multiple JSON files found",
-                }
-            )
-        elif len(json_files) == 0:
-            results.append(
-                {
-                    "subdirectory": subdir,
-                    "file": None,
-                    "status": "Error",
-                    "error": "No JSON file found",
-                }
-            )
+def list_bucket_contents(bucket_name, prefix=""):
+    """
+    Recursively list the contents of a Google Cloud Storage bucket in a tree-like structure.
 
-    # Report results
-    for result in results:
-        print(f"Subdirectory: {result['subdirectory']}")
-        print(f"File: {result['file']}")
-        print(f"Status: {result['status']}")
-        if result["error"]:
-            print(f"Error: {result['error']}")
-        print("-" * 40)
+    Args:
+        bucket_name (str): The name of the GCS bucket.
+        prefix (str): The prefix to list. Defaults to the root of the bucket.
+    """
+    credentials = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE
+    )
+    client = storage.Client(credentials=credentials)
+    bucket = client.get_bucket(bucket_name)
+
+    # Fetch all blobs with the given prefix
+    blobs = bucket.list_blobs(prefix=prefix)
+
+    tree = {}
+
+    # Organize blobs into a nested dictionary structure
+    for blob in blobs:
+        parts = blob.name.split("/")
+        node = tree
+        for part in parts:
+            node = node.setdefault(part, {})
+
+    # Recursive function to display the tree structure
+    def display_tree(node, indent=0):
+        for key, subnode in sorted(node.items()):
+            if subnode:  # If the node has children
+                print("    " * indent + f"└── {key}/")
+                display_tree(subnode, indent + 1)
+            else:
+                print("    " * indent + f"└── {key}")
+
+    print(f"(GCS Buckets Root of GCP Project)")
+    print(f"└── {bucket_name}/")
+    display_tree(tree, indent=1)
 
 
-# Replace 'your_directory_path' with the directory you want to process
 if __name__ == "__main__":
-    main("/Users/ik/repos/kwento/backend/local_data")
+    # check_bucket_access()
+    list_bucket_contents(BUCKET_NAME)

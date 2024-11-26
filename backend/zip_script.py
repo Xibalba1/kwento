@@ -7,28 +7,31 @@ from fnmatch import fnmatch
 def zip_directory(root_dir, zip_file_path, ignore_patterns):
     with zipfile.ZipFile(zip_file_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         for foldername, subfolders, filenames in os.walk(root_dir):
-            # Exclude folders matching the ignore pattern
-            subfolders[:] = [
-                d
-                for d in subfolders
-                if not any(
-                    fnmatch(os.path.join(foldername, d), pat) for pat in ignore_patterns
-                )
-            ]
+            # Normalize foldername to a relative path for comparison
+            rel_folder = os.path.relpath(foldername, root_dir)
 
+            # Skip this entire folder if it matches any pattern
+            if any(fnmatch(rel_folder, pat) for pat in ignore_patterns):
+                print(f"Skipping folder: {rel_folder}")
+                subfolders[:] = []  # Clear subfolders to stop os.walk from descending
+                continue
+
+            # Process files in this folder
             for filename in filenames:
                 file_path = os.path.join(foldername, filename)
+                rel_file_path = os.path.relpath(file_path, root_dir)
+
                 # Skip files matching any ignore pattern or the zip file itself
                 if (
-                    any(
-                        fnmatch(os.path.relpath(file_path, root_dir), pat)
-                        for pat in ignore_patterns
-                    )
+                    any(fnmatch(rel_file_path, pat) for pat in ignore_patterns)
                     or file_path == zip_file_path
                 ):
+                    print(f"Skipping file: {rel_file_path}")
                     continue
+
                 # Write file to zip, preserving the relative path from the root directory
                 arcname = os.path.relpath(file_path, root_dir)
+                print(f"Adding to zip: {arcname}")
                 zipf.write(file_path, arcname)
 
 

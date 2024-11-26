@@ -1,4 +1,4 @@
-# backend/src/kwento_backend/api/models/helpers.py
+# backend/src/api/models/helpers.py
 
 from .book_models import Book
 import logging

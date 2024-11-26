@@ -8,5 +8,5 @@ From terminal:
 
 # TO DOs:
 
-- `backend/src/kwento_backend/api/routers/books.py::create_book()` assigns an `id` to a book. This is not good.
+- `backend/src/api/routers/books.py::create_book()` assigns an `id` to a book. This is not good.
   - Instead, we should assign an `id` (`uuid`) to the book at creation time, and eliminate this assignment at delivery time.

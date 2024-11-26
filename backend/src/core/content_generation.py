@@ -1,4 +1,4 @@
-# backend/src/kwento_backend/core/content_generation.py
+# backend/src/core/content_generation.py
 
 import json
 import random
