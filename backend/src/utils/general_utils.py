@@ -4,7 +4,11 @@ from pathlib import Path
 import logging
 from google.cloud import storage
 from google.oauth2 import service_account
-from config import settings
+
+try:
+    from config import settings
+except Exception as e:
+    print(e)
 import json
 
 logger = logging.getLogger(__name__)
@@ -29,10 +33,10 @@ def get_target_directory(relative_path: str) -> Path:
     from the project root.
 
     Args:
-                relative_path (str): A relative path string to the target directory within the project.
+        relative_path (str): A relative path string to the target directory within the project.
 
     Returns:
-                Path: The full path to the target directory.
+        Path: The full path to the target directory.
     """
     # Get the project root dynamically
     project_root = get_project_root()
@@ -44,6 +48,17 @@ def get_target_directory(relative_path: str) -> Path:
     target_dir.mkdir(parents=True, exist_ok=True)
 
     return target_dir
+
+
+def get_gcs_file_cred_dir() -> str:
+    """
+    Gets the directory containing GCS credential file.
+    """
+    try:
+        gcs_cred_dir = get_target_directory("secrets")
+    except Exception as e:
+        logger.error(f"Error locating GCS credentials directory: {e}")
+    return gcs_cred_dir
 
 
 def save_file(file_name: str, content: str, relative_path: str = "local_data") -> Path:
@@ -218,11 +233,11 @@ def write_json_file(
     Returns:
         str: The path or URL where the file was saved.
     """
+    content = json.dumps(data, default=str)
     if settings.use_cloud_storage:
-        content = json.dumps(data)
         return save_file_to_gcs(file_name, content, relative_path)
     else:
-        local_path = save_file(file_name, json.dumps(data), relative_path)
+        local_path = save_file(file_name, content, relative_path)
         return str(local_path)
 
 
@@ -250,3 +265,105 @@ def read_json_file(file_name: str, relative_path: str = "local_data") -> dict:
         file_path = get_target_directory(relative_path) / file_name
         with open(file_path, "r", encoding="utf-8") as f:
             return json.load(f)
+
+
+def ensure_directory_exists(path: str):
+    """
+    Ensures a directory exists, supporting both local storage and GCS.
+
+    Args:
+        path (str): The directory or GCS path.
+    """
+    logger.debug(f"Called ensure_directory_exists with path: {path}")
+    logger.debug(f"Settings.use_cloud_storage: {settings.use_cloud_storage}")
+
+    if settings.use_cloud_storage:
+        try:
+            if "/" not in path:
+                logger.error(f"Invalid GCS path: '{path}'. Must include a bucket name.")
+                raise ValueError("Invalid GCS path. Format must be 'bucket_name/path'.")
+
+            bucket_name, gcs_path = path.split("/", 1)
+            logger.debug(f"Parsed bucket_name: '{bucket_name}', gcs_path: '{gcs_path}'")
+
+            client = get_gcs_client()
+            bucket = client.get_bucket(bucket_name)
+            blob = bucket.blob(f"{gcs_path}/.keep")
+            blob.upload_from_string("")  # Virtual directory creation
+        except Exception as e:
+            logger.error(f"Unable to confirm directory {path} exists: {e}")
+            raise
+    else:
+        logger.debug(f"Ensuring local directory exists: {path}")
+        Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def construct_storage_path(relative_path: str) -> str:
+    """
+    Constructs a storage path based on the configuration.
+
+    If `use_cloud_storage` is True, prepends the GCS bucket name to the path.
+    Otherwise, returns the local storage path.
+
+    Args:
+        relative_path (str): The relative path for the storage resource.
+
+    Returns:
+        str: The constructed storage path.
+    """
+    logger.debug(f"Constructing storage path for relative_path: {relative_path}")
+    if settings.use_cloud_storage:
+        if not settings.gcs_bucket_name:
+            raise ValueError("GCS bucket name is not configured in settings.")
+        return relative_path
+    else:
+        return str(Path("local_data") / relative_path)
+
+
+if __name__ == "__main__":
+    from pydantic import BaseSettings
+    from pathlib import Path
+
+    def get_gcs_cred_file_path() -> str:
+        """
+        Gets the path of the GCS credentials file for the project.
+
+        Due to project structure and entrypoint, we need to get the
+        absolute path of this file.
+        """
+        try:
+            # Get the project root dynamically
+            current_dir = Path(__file__).resolve()
+            for parent in current_dir.parents:
+                # Look for 'backend' as the specific project root marker
+                if parent.name == "kwento" and (parent / ".gitignore").exists():
+                    project_root = parent
+                    break
+
+            # Determine the target directory path
+            gcs_cred_dir = project_root / "secrets"
+
+            # Create the directory if it doesn't exist
+            gcs_cred_dir.mkdir(parents=True, exist_ok=True)
+
+            gcs_cred_fp = gcs_cred_dir / "kwento-88cf359a16d5.json"
+        except Exception as e:
+            raise RuntimeError("GCS credentials cannot be located.")
+        return str(gcs_cred_fp)
+
+    class Settings(BaseSettings):
+        openai_api_key: str
+        use_cloud_storage: bool = (
+            True  # Default to False; set to True to use Google Cloud Storage
+        )
+        gcs_bucket_name: str = "kwento-books"  # GCS bucket name
+        gcs_service_account_json: str = (
+            get_gcs_cred_file_path()
+        )  # Path GCP storage service account JSON key
+
+        class Config:
+            env_file = ".env"
+
+    settings = Settings()
+
+    ensure_directory_exists("antons_moon_adventure")
