@@ -1,12 +1,12 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from kwento_backend.core.content_generation import generate_book
-from kwento_backend.api.models.book_models import Book
+from src.core.content_generation import generate_book
+from src.api.models.book_models import Book
 
 
 @pytest.mark.asyncio
-@patch("kwento_backend.core.content_generation.generate_page_illustrations")
-@patch("kwento_backend.core.content_generation.openai_service.get_book_response")
+@patch("src.core.content_generation.generate_page_illustrations")
+@patch("src.core.content_generation.openai_service.get_book_response")
 async def test_generate_book(mock_get_book_response, mock_generate_page_illustrations):
     # Mock OpenAI's response for get_book_response
     assistant_message = """

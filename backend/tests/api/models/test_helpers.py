@@ -1,6 +1,6 @@
 import pytest
-from kwento_backend.api.models.book_models import Book, Page, PageContent, Character
-from kwento_backend.api.models.helpers import assign_book_model_relationships
+from src.api.models.book_models import Book, Page, PageContent, Character
+from src.api.models.helpers import assign_book_model_relationships
 
 
 def test_assign_book_model_relationships():

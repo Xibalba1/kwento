@@ -1,5 +1,5 @@
 import pytest
-from kwento_backend.api.models.book_models import Character, PageContent, Page, Book
+from src.api.models.book_models import Character, PageContent, Page, Book
 
 
 def test_character_model():

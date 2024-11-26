@@ -1,4 +1,4 @@
-# backend/src/kwento_backend/services/openai_service.py
+# backend/src/services/openai_service.py
 """
 Service module for interacting with OpenAI's API to generate text responses and images
 based on provided prompts. This module includes asynchronous functions for generating

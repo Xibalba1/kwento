@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from kwento_backend.services.openai_service import generate_image, get_book_response
+from src.services.openai_service import generate_image, get_book_response
 import openai
 
 

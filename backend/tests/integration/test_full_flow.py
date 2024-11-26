@@ -1,12 +1,12 @@
 import pytest
-from kwento_backend.main import app
+from src.main import app
 from httpx import AsyncClient
 from unittest.mock import patch, MagicMock
 
 
 @pytest.mark.asyncio
-@patch("kwento_backend.services.openai_service.get_book_response")
-@patch("kwento_backend.services.openai_service.generate_image")
+@patch("src.services.openai_service.get_book_response")
+@patch("src.services.openai_service.generate_image")
 async def test_full_flow(mock_generate_image, mock_get_book_response):
     # Mock OpenAI's response for get_book_response
     assistant_message = """

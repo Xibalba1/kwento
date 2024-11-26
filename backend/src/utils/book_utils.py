@@ -1,4 +1,4 @@
-# backend/src/kwento_backend/utils/book_utils.py
+# backend/src/utils/book_utils.py
 import re
 from datetime import datetime
 

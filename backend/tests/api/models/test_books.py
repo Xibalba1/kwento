@@ -1,11 +1,11 @@
 import pytest
 from httpx import AsyncClient
-from kwento_backend.main import app
+from src.main import app
 from unittest.mock import patch, MagicMock
 
 
 @pytest.mark.asyncio
-@patch("kwento_backend.api.routers.books.content_generation.generate_book")
+@patch("src.api.routers.books.content_generation.generate_book")
 async def test_create_book(mock_generate_book):
     # Mock generate_book
     mock_book = MagicMock()

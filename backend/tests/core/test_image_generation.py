@@ -2,7 +2,7 @@
 test_image_generation.py
 ========================
 
-This module contains unit tests for the `image_generation` functions in the `kwento_backend.core` package. The tests focus on verifying the functionality and robustness of the `make_illustration_prompt` and `generate_single_page_illustration` functions, ensuring they handle various input scenarios and errors correctly.
+This module contains unit tests for the `image_generation` functions in the `src.core` package. The tests focus on verifying the functionality and robustness of the `make_illustration_prompt` and `generate_single_page_illustration` functions, ensuring they handle various input scenarios and errors correctly.
 
 Usage
 -----
@@ -15,11 +15,11 @@ pytest backend/tests/core/test_image_generation.py
 
 import pytest
 from unittest.mock import MagicMock, patch
-from kwento_backend.api.models.book_models import Page, Character
-from kwento_backend.core.image_generation import make_illustration_prompt
+from src.api.models.book_models import Page, Character
+from src.core.image_generation import make_illustration_prompt
 import json
-from kwento_backend.core.image_generation import generate_single_page_illustration
-from kwento_backend.core.prompts import prompts as pt
+from src.core.image_generation import generate_single_page_illustration
+from src.core.prompts import prompts as pt
 import logging
 
 # Set up logging
@@ -176,7 +176,7 @@ def test_make_illustration_prompt_empty_characters():
 
 
 @pytest.mark.asyncio
-@patch("kwento_backend.services.openai_service.generate_image")
+@patch("src.services.openai_service.generate_image")
 async def test_generate_single_page_illustration(mock_generate_image):
     # Mock response
     mock_generate_image.return_value = MagicMock(
@@ -207,7 +207,7 @@ async def test_generate_single_page_illustration(mock_generate_image):
 
 
 @pytest.mark.asyncio
-@patch("kwento_backend.services.openai_service.generate_image")
+@patch("src.services.openai_service.generate_image")
 async def test_generate_single_page_illustration_api_error(mock_generate_image):
     """
     Test generate_single_page_illustration when the OpenAI API raises an exception.
@@ -240,7 +240,7 @@ async def test_generate_single_page_illustration_api_error(mock_generate_image):
 
 
 @pytest.mark.asyncio
-@patch("kwento_backend.services.openai_service.generate_image")
+@patch("src.services.openai_service.generate_image")
 async def test_generate_single_page_illustration_invalid_response(mock_generate_image):
     """
     Test generate_single_page_illustration when OpenAI API returns an invalid response.
