@@ -2,7 +2,7 @@
 
 From terminal:
 
-1. cd into `kwento/backend`
+1. cd into `kwento/backend/src`
 2. `poetry shell`
 3. `uvicorn main:app --reload`
 

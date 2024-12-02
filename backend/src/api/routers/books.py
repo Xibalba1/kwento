@@ -2,37 +2,24 @@
 
 import random
 from pathlib import Path
-from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, HTTPException, Request
+from typing import List, Dict, Any
+from datetime import datetime, timedelta, timezone
 import logging
 
-from api.models.book_models import Book
+from config import settings
+from api.models.book_models import Book, BookResponse, BookCreateRequest, ImageResponse
 from core import content_generation
-from utils.general_utils import read_json_file
+from utils.general_utils import (
+    get_book_list,
+    get_book_by_id,
+    read_json_file,
+    generate_presigned_url,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-class BookCreateRequest(BaseModel):
-    theme: str
-
-
-class PageResponse(BaseModel):
-    page_number: int
-    text_content: str
-    illustration_b64_data: str
-    illustration: Optional[str] = None  # Add this field
-    characters: List[str]
-
-
-class BookResponse(BaseModel):
-    book_id: str
-    title: str
-    pages: List[PageResponse]
 
 
 @router.post("/", response_model=BookResponse)
@@ -47,26 +34,49 @@ async def create_book(book_request: BookCreateRequest):
             f"Generated book titled: '{book.book_title}' with {len(book.pages)} pages."
         )
 
+        # Generate pre-signed URL for the book JSON file
+        expiration_time = timedelta(hours=1)
+        expires_at = datetime.now(timezone.utc) + expiration_time
+
+        if settings.use_cloud_storage:
+            json_blob_name = f"{book.book_id}/{book.book_id}.json"
+            json_url = generate_presigned_url(json_blob_name, expiration=3600)
+        else:
+            json_url = str(
+                (
+                    Path(settings.local_data_path)
+                    / f"{book.book_id}/{book.book_id}.json"
+                ).resolve()
+            )
+
+        # Prepare the response
+        images_response = []
+        for page in book.pages:
+            illustration = page.content.illustration
+            if illustration:
+                images_response.append(
+                    ImageResponse(
+                        page=page.page_number,
+                        url=illustration["url"],
+                        expires_at=illustration["expires_at"],
+                    )
+                )
+            else:
+                logger.warning(f"No illustration data for page {page.page_number}")
+
         response = BookResponse(
             book_id=str(book.book_id),
-            title=book.book_title,
-            pages=[
-                PageResponse(
-                    page_number=page.page_number,
-                    text_content=page.content.text_content_of_this_page,
-                    illustration=page.content.illustration,  # Include the illustration URL or path
-                    characters=page.content.characters_in_this_page,
-                )
-                for page in book.pages
-            ],
+            book_title=book.book_title,
+            expires_at=expires_at,
+            json_url=json_url,
+            images=images_response,
         )
-        logger.info(
-            f"Successfully constructed BookResponse for book '{book.book_title}'."
-        )
+
+        logger.info(f"Successfully constructed response for book: {book.book_title}")
         return response
     except Exception as e:
-        logger.exception(f"Error creating book: {e}")
-        raise HTTPException(status_code=500, detail=f"Error generating book: {e}")
+        logger.exception("Failed to create book.")
+        raise HTTPException(status_code=500, detail="Book creation failed.")
 
 
 @router.get("/random/", response_model=BookResponse)
@@ -129,17 +139,6 @@ async def get_random_book():
                 status_code=500,
                 detail=f"Invalid JSON format in book file: {book_json_path}",
             )
-        # TODO: deprecated, remove following block
-        # with open(book_json_path, "r", encoding="utf-8") as f:
-        #     try:
-        #         book_data = json.load(f)
-        #         logger.debug(f"Successfully loaded JSON data from {book_json_path}")
-        #     except json.JSONDecodeError as jde:
-        #         logger.error(f"JSON decode error for file {book_json_path}: {jde}")
-        #         raise HTTPException(
-        #             status_code=500,
-        #             detail=f"Invalid JSON format in book file: {book_json_path}",
-        #         )
 
         # Validate required fields
         required_fields = ["book_title", "pages"]
@@ -150,16 +149,6 @@ async def get_random_book():
                     status_code=500,
                     detail=f"Missing required field '{field}' in book data.",
                 )
-
-        # Assign a UUID if not present
-        # if "book_id" not in book_data:
-        #     book_data["book_id"] = str(uuid4())  # Assign a new UUID as a string
-        #     # Save the updated JSON back to the file
-        #     with open(book_json_path, "w", encoding="utf-8") as f:
-        #         json.dump(book_data, f, indent=4)
-        #     logger.info(
-        #         f"Assigned new UUID to book '{book_data['book_title']}' and updated JSON file."
-        #     )
 
         # Parse the JSON data into the Book model for validation
         try:
@@ -178,13 +167,13 @@ async def get_random_book():
         # Transform the data to match BookResponse
         try:
             response = {
-                "book_id": str(book.book_id),  # Ensuring book_id is a string
+                "book_id": str(book.book_id),
                 "title": book.book_title,
                 "pages": [
                     {
                         "page_number": page.page_number,
                         "text_content": page.content.text_content_of_this_page,
-                        "illustration_b64_data": page.content.illustration_b64_data,
+                        "illustration": page.content.illustration,  # Use the illustration URL
                         "characters": page.content.characters_in_this_page,
                     }
                     for page in book.pages
@@ -230,72 +219,20 @@ async def get_random_book():
 
 
 @router.get("/", response_model=List[Dict[str, Any]])
-async def list_books():
+async def list_books(request: Request):
     """
-    Lists all existing books.
+    Lists all existing books with metadata, pre-signed URLs, and images.
     """
     logger.info("Received request to list all books.")
     try:
-        # Determine the absolute path to the local_data directory
-        current_file = Path(__file__).resolve()
-        local_data_path = current_file.parents[3] / "local_data"
+        books_list = get_book_list()
 
-        if not local_data_path.exists():
-            logger.error(f"local_data directory not found at {local_data_path}")
-            raise HTTPException(
-                status_code=500, detail="local_data directory not found."
-            )
-
-        # Get list of subdirectories (each corresponds to a book)
-        book_dirs = [d for d in local_data_path.iterdir() if d.is_dir()]
-
-        if not book_dirs:
-            logger.error("No books found in local_data directory.")
+        if not books_list:
+            logger.error("No books available.")
             raise HTTPException(status_code=404, detail="No books available.")
 
-        books_list = []
-
-        for book_dir in book_dirs:
-            # Find the JSON file in the book directory
-            json_files = [f for f in book_dir.iterdir() if f.suffix == ".json"]
-            if not json_files:
-                continue  # Skip if no JSON file found
-            book_json_path = json_files[0]
-
-            # Read the JSON file
-            try:
-                book_data = read_json_file(book_json_path, "books")
-            except Exception as e:
-                logger.error(f"Error loading JSON for {book_json_path}: {e}")
-
-            # TODO: deprecated, remove after testing
-            # with open(book_json_path, "r", encoding="utf-8") as f:
-            #     try:
-            #         book_data = json.load(f)
-            #     except json.JSONDecodeError as jde:
-            #         logger.error(f"JSON decode error for file {book_json_path}: {jde}")
-            #         continue  # Skip this book
-
-            # Validate required fields
-            if "book_title" not in book_data:
-                continue  # Skip if title is missing
-
-            # TODO: deprecated, delete after testing:
-            # Assign a UUID if not present
-            # if "book_id" not in book_data:
-            #     book_data["book_id"] = str(uuid4())
-            #     # Save the updated JSON back to the file
-            #     with open(book_json_path, "w", encoding="utf-8") as f_out:
-            #         json.dump(book_data, f_out, indent=4)
-            #     logger.info(f"Assigned new UUID to book '{book_data['book_title']}'.")
-
-            books_list.append(
-                {"book_id": str(book_data["book_id"]), "title": book_data["book_title"]}
-            )
-        # sort the books by title, alphabetically
-        # assumed to be O(nlog⁡n)O(nlogn) for time and O(n) for space
-        # (could be dangerous!)
-        sorted_books = sorted(books_list, key=lambda x: x["title"])
+        sorted_books = sorted(books_list, key=lambda x: x["book_title"])
+        logger.debug(f"list_books(): book list sorted. returning `sorted_books`")
         return sorted_books
 
     except Exception as e:
@@ -304,70 +241,17 @@ async def list_books():
 
 
 @router.get("/{book_id}/", response_model=BookResponse)
-async def get_book_by_id(book_id: str):
+async def fetch_book_by_id(book_id: str):
     """
     Fetches a specific book by its ID.
     """
     logger.info(f"Received request to fetch book with ID: {book_id}")
     try:
-        # Determine the absolute path to the local_data directory
-        current_file = Path(__file__).resolve()
-        local_data_path = current_file.parents[3] / "local_data"
-
-        if not local_data_path.exists():
-            logger.error(f"local_data directory not found at {local_data_path}")
-            raise HTTPException(
-                status_code=500, detail="local_data directory not found."
-            )
-
-        # Iterate over book directories to find the book with matching ID
-        book_dirs = [d for d in local_data_path.iterdir() if d.is_dir()]
-
-        for book_dir in book_dirs:
-            json_files = [f for f in book_dir.iterdir() if f.suffix == ".json"]
-            if not json_files:
-                continue
-            book_json_path = json_files[0]
-
-            try:
-                book_data = read_json_file(book_json_path, "books")
-            except Exception as e:
-                logger.error(f"Error reading JSON for file {book_json_path}: {e}")
-
-            # TODO: deprecated, delete after testing:
-            # with open(book_json_path, "r", encoding="utf-8") as f:
-            #     try:
-            #         book_data = json.load(f)
-            #     except json.JSONDecodeError as jde:
-            #         logger.error(f"JSON decode error for file {book_json_path}: {jde}")
-            #         continue
-
-            if str(book_data.get("book_id", "")) == book_id:
-                # Parse the book data
-                book = Book(**book_data)
-
-                # Transform the data to match BookResponse
-                response = {
-                    "book_id": str(book.book_id),
-                    "title": book.book_title,
-                    "pages": [
-                        {
-                            "page_number": page.page_number,
-                            "text_content": page.content.text_content_of_this_page,
-                            "illustration_b64_data": page.content.illustration_b64_data,
-                            "characters": page.content.characters_in_this_page,
-                        }
-                        for page in book.pages
-                    ],
-                }
-
-                book_response = BookResponse(**response)
-                logger.info(f"Successfully fetched book '{book.book_title}'.")
-                return book_response
-
-        logger.error(f"Book with ID {book_id} not found.")
+        book = get_book_by_id(book_id)  # Call the utility function
+        return book
+    except ValueError as e:
+        logger.error(str(e))
         raise HTTPException(status_code=404, detail="Book not found.")
-
     except Exception as e:
         logger.exception(f"Unexpected error fetching book: {e}")
         raise HTTPException(status_code=500, detail="Error fetching book.")

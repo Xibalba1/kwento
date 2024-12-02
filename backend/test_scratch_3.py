@@ -77,6 +77,63 @@ def list_bucket_contents(bucket_name, prefix=""):
     display_tree(tree, indent=1)
 
 
+import json
+
+
+def update_metadata_with_book_info(bucket_name):
+    """
+    Iterate over each directory in the bucket, open the JSON file in each directory,
+    extract 'book_id' and 'book_title' values, and update the JSON file in GCS with
+    these values as custom metadata.
+
+    Args:
+        bucket_name (str): The name of the GCS bucket.
+    """
+    credentials = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE
+    )
+    client = storage.Client(credentials=credentials)
+    bucket = client.get_bucket(bucket_name)
+
+    # List all blobs in the bucket
+    blobs = bucket.list_blobs()
+    print(f"Blobs in target bucket: {blobs}")
+
+    # Filter and process directories containing JSON files
+    for blob in blobs:
+        if blob.name.endswith(".json"):  # Check for JSON files
+            try:
+                # Download the JSON file contents
+                print(f"Processing file: {blob.name}")
+                json_content = blob.download_as_text()
+                json_data = json.loads(json_content)
+
+                # Extract 'book_id' and 'book_title'
+                book_id = json_data.get("book_id")
+                book_title = json_data.get("book_title")
+
+                if not book_id or not book_title:
+                    print(
+                        f"Skipping {blob.name}: Missing 'book_id' or 'book_title' in the JSON data."
+                    )
+                    continue
+
+                # Update metadata
+                metadata = blob.metadata or {}
+                metadata["book_id"] = book_id
+                metadata["book_title"] = book_title
+
+                # Save updated metadata to the GCS blob
+                blob.metadata = metadata
+                blob.patch()
+
+                print(
+                    f"Updated metadata for {blob.name}: book_id={book_id}, book_title={book_title}"
+                )
+            except Exception as e:
+                print(f"Failed to process {blob.name}: {e}")
+
+
 if __name__ == "__main__":
-    # check_bucket_access()
+    # Example usage
     list_bucket_contents(BUCKET_NAME)

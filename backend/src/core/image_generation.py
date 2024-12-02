@@ -10,7 +10,6 @@ from config import settings
 from services import openai_service, image_service
 from api.models.book_models import Page
 from core.prompts import prompts as pt
-from utils.book_utils import book_title_normalize
 from utils.general_utils import (
     ensure_directory_exists,
     write_json_file,
@@ -62,7 +61,9 @@ async def generate_single_page_illustration(
 
         # Update page content
         page.content.illustration = saved_path
-        page.content.illustration_b64_data = image_b64
+        logger.debug(
+            f"generate_single_page_illustration(): book.page.illustration set to {saved_path} for page number {page.page_number}"
+        )
 
         return {"image_data": image_b64}
     except Exception as e:
@@ -77,13 +78,13 @@ async def generate_page_illustrations(book) -> Dict[int, Any]:
     illustrations = {}
     logger.info(f"Generating illustrations for the book '{book.book_title}'")
 
-    # Normalize the book title for consistent naming
-    book_normalized = book_title_normalize(book.book_title, append_datetime=False)
-    logger.debug(f"Normalized book title: {book_normalized}")
+    # image_generation.py
+    book_id_str = str(book.book_id)
+    logger.debug(f"Using book_id for directory names: {book_id_str}")
 
     # Construct paths using the utility function
-    book_dir = construct_storage_path(book_normalized)
-    images_dir = construct_storage_path(f"{book_normalized}/images")
+    book_dir = construct_storage_path(book_id_str)
+    images_dir = construct_storage_path(f"{book_id_str}/images")
 
     logger.debug(f"Constructed book_dir: {book_dir}")
     logger.debug(f"Constructed images_dir: {images_dir}")
@@ -106,7 +107,15 @@ async def generate_page_illustrations(book) -> Dict[int, Any]:
     # Save book JSON at the root of book_dir
     book_copy_no_refs = remove_book_model_relationships(copy.deepcopy(book))
     book_data = book_copy_no_refs.dict()
-    write_json_file(f"{book_normalized}.json", book_data, relative_path=book_dir)
+
+    # metadata to be attached to JSON file in cloud store
+    metadata = {
+        "book_id": str(book.book_id),
+        "book_title": book.book_title,
+    }
+
+    filename = f"{book_id_str}.json"
+    write_json_file(filename, book_data, relative_path=book_dir, metadata=metadata)
     logger.info(f"Saved book JSON for '{book.book_title}'")
 
     return illustrations

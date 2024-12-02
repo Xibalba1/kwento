@@ -4,14 +4,18 @@ from pathlib import Path
 import logging
 from google.cloud import storage
 from google.oauth2 import service_account
+from typing import List, Dict, Any
+import json
+from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 try:
     from config import settings
 except Exception as e:
-    print(e)
-import json
-
-logger = logging.getLogger(__name__)
+    print(
+        f"Unable to import settings. Application cannot function without this data: {e}"
+    )
 
 
 def get_project_root() -> Path:
@@ -132,7 +136,10 @@ def get_gcs_client() -> storage.Client:
 
 
 def save_binary_file_to_gcs(
-    file_name: str, content: bytes, relative_path: str = ""
+    file_name: str,
+    content: bytes,
+    relative_path: str = "",
+    content_type: str = "image/png",
 ) -> str:
     """
     Saves a binary file to Google Cloud Storage.
@@ -141,6 +148,7 @@ def save_binary_file_to_gcs(
         file_name (str): The name of the file to save.
         content (bytes): The binary content to write into the file.
         relative_path (str): The path within the bucket where the file will be saved.
+        content_type (str): MIME type as per IANA definitions
 
     Returns:
         str: The GCS URL of the saved file.
@@ -160,23 +168,31 @@ def save_binary_file_to_gcs(
             blob_name = file_name
 
         blob = bucket.blob(blob_name)
-        blob.upload_from_string(content)
+        blob.upload_from_string(content, content_type=content_type)
 
         logger.info(f"Saved file to GCS at gs://{bucket_name}/{blob_name}")
-        return f"gs://{bucket_name}/{blob_name}"
+        return blob_name
     except Exception as e:
         logger.error(f"Error saving file to GCS: {e}")
         raise
 
 
-def save_file_to_gcs(file_name: str, content: str, relative_path: str = "") -> str:
+def save_file_to_gcs(
+    file_name: str,
+    content: str,
+    relative_path: str = "",
+    content_type="application/json",
+    metadata: dict = None,
+) -> str:
     """
-    Saves a text file to Google Cloud Storage.
+    Saves a text file to Google Cloud Storage with optional metadata.
 
     Args:
         file_name (str): The name of the file to save.
         content (str): The text content to write into the file.
         relative_path (str): The path within the bucket where the file will be saved.
+        content_type (str): MIME type of the content.
+        metadata (dict): Optional metadata to set on the blob.
 
     Returns:
         str: The GCS URL of the saved file.
@@ -196,10 +212,11 @@ def save_file_to_gcs(file_name: str, content: str, relative_path: str = "") -> s
             blob_name = file_name
 
         blob = bucket.blob(blob_name)
-        blob.upload_from_string(content, content_type="text/plain")
+        blob.metadata = metadata
+        blob.upload_from_string(content, content_type=content_type)
 
         logger.info(f"Saved file to GCS at gs://{bucket_name}/{blob_name}")
-        return f"gs://{bucket_name}/{blob_name}"
+        return blob_name
     except Exception as e:
         logger.error(f"Error saving file to GCS: {e}")
         raise
@@ -220,7 +237,7 @@ def get_gcs_file_url(relative_filepath: str) -> str:
 
 
 def write_json_file(
-    file_name: str, data: dict, relative_path: str = "local_data"
+    file_name: str, data: dict, relative_path: str = "local_data", metadata: dict = None
 ) -> str:
     """
     Writes JSON data to a file, either locally or in GCS, based on settings.
@@ -229,13 +246,20 @@ def write_json_file(
         file_name (str): The name of the file to save.
         data (dict): The JSON data to save.
         relative_path (str): The relative path or GCS folder to save in.
+        metadata (dict): Optional metadata to set on the file (GCS only).
 
     Returns:
         str: The path or URL where the file was saved.
     """
     content = json.dumps(data, default=str)
     if settings.use_cloud_storage:
-        return save_file_to_gcs(file_name, content, relative_path)
+        return save_file_to_gcs(
+            file_name,
+            content,
+            relative_path,
+            content_type="application/json",
+            metadata=metadata,
+        )
     else:
         local_path = save_file(file_name, content, relative_path)
         return str(local_path)
@@ -320,50 +344,321 @@ def construct_storage_path(relative_path: str) -> str:
         return str(Path("local_data") / relative_path)
 
 
-if __name__ == "__main__":
-    from pydantic import BaseSettings
-    from pathlib import Path
+def get_book_list() -> List[Dict[str, Any]]:
+    """
+    Returns a list of books, each represented as a dictionary with metadata, pre-signed URLs, and images.
+    """
+    books_dict = {}
 
-    def get_gcs_cred_file_path() -> str:
-        """
-        Gets the path of the GCS credentials file for the project.
-
-        Due to project structure and entrypoint, we need to get the
-        absolute path of this file.
-        """
+    if settings.use_cloud_storage:
+        # Use GCS
         try:
-            # Get the project root dynamically
-            current_dir = Path(__file__).resolve()
-            for parent in current_dir.parents:
-                # Look for 'backend' as the specific project root marker
-                if parent.name == "kwento" and (parent / ".gitignore").exists():
-                    project_root = parent
-                    break
+            client = get_gcs_client()
+            bucket = client.bucket(settings.gcs_bucket_name)
 
-            # Determine the target directory path
-            gcs_cred_dir = project_root / "secrets"
+            # List all blobs
+            blobs = bucket.list_blobs()
 
-            # Create the directory if it doesn't exist
-            gcs_cred_dir.mkdir(parents=True, exist_ok=True)
+            expiration_time = timedelta(hours=1)
+            expires_at = datetime.now(timezone.utc) + expiration_time
 
-            gcs_cred_fp = gcs_cred_dir / "kwento-88cf359a16d5.json"
+            for blob in blobs:
+                blob_name = blob.name
+
+                # Process JSON files
+                if blob_name.endswith(".json"):
+                    # Ensure metadata is loaded
+                    blob.reload()
+                    metadata = blob.metadata or {}
+                    book_id = metadata.get("book_id")
+                    book_title = metadata.get("book_title")
+                    logger.debug(
+                        f"get_book_list(): `book_id` {book_id} | `book_title` {book_title}"
+                    )
+
+                    if book_id and book_title:
+                        # Generate pre-signed URL for the JSON metadata
+                        json_url = generate_presigned_url(blob_name, expiration=3600)
+
+                        # Initialize book entry if not already present
+                        if book_id not in books_dict:
+                            books_dict[book_id] = {
+                                "book_id": book_id,
+                                "book_title": book_title,
+                                "json_url": json_url,
+                                "expires_at": expires_at,
+                                "images": [],
+                            }
+                        else:
+                            # Update json_url and book_title if needed
+                            books_dict[book_id]["json_url"] = json_url
+                            books_dict[book_id]["book_title"] = book_title
+                    else:
+                        logger.error(f"Missing metadata for blob {blob_name}")
+
+                # Process image files
+                elif blob_name.endswith(".png"):
+                    # Assuming images are stored under {book_id}/images/{page}.png
+                    parts = blob_name.split("/")
+                    if len(parts) >= 3 and parts[1] == "images":
+                        book_id = parts[0]
+                        page_str = parts[2].replace(".png", "")
+                        try:
+                            page = int(page_str)
+                        except ValueError:
+                            logger.error(
+                                f"Invalid page number in blob name {blob_name}"
+                            )
+                            continue
+
+                        # Generate pre-signed URL for the image
+                        image_url = generate_presigned_url(blob_name, expiration=3600)
+
+                        # Initialize book entry if not already present
+                        if book_id not in books_dict:
+                            books_dict[book_id] = {
+                                "book_id": book_id,
+                                "book_title": "",  # Will be updated when JSON is processed
+                                "json_url": "",  # Will be updated when JSON is processed
+                                "expires_at": expires_at,
+                                "images": [],
+                            }
+
+                        # Add image to the book's images
+                        books_dict[book_id]["images"].append(
+                            {
+                                "page": page,
+                                "url": image_url,
+                                "expires_at": expires_at,
+                            }
+                        )
+                else:
+                    # Skip other files
+                    continue
+
+            # Convert books_dict to a list
+            books_list = list(books_dict.values())
+
+            # Optional: Sort images by page number for each book
+            for book in books_list:
+                book["images"].sort(key=lambda x: x["page"])
+
+            return books_list
+
         except Exception as e:
-            raise RuntimeError("GCS credentials cannot be located.")
-        return str(gcs_cred_fp)
+            logger.error(f"Error accessing cloud storage: {e}")
+            return []
+    else:
+        try:
+            local_data_path = Path(settings.local_data_path)
+            logger.debug(f"'local_data_path': {local_data_path}")
 
-    class Settings(BaseSettings):
-        openai_api_key: str
-        use_cloud_storage: bool = (
-            True  # Default to False; set to True to use Google Cloud Storage
+            if not local_data_path.exists():
+                logger.error(f"local_data directory not found at {local_data_path}")
+                return books_list
+
+            # Get list of subdirectories (each corresponds to a book)
+            book_dirs = [d for d in local_data_path.iterdir() if d.is_dir()]
+
+            if not book_dirs:
+                logger.error("No books found in local_data directory.")
+                return books_list
+
+            for book_dir in book_dirs:
+                # Find the JSON file in the book directory
+                json_files = [f for f in book_dir.iterdir() if f.suffix == ".json"]
+                if not json_files:
+                    continue  # Skip if no JSON file found
+                book_json_path = json_files[0]
+
+                # Read the JSON file using the utility function
+                try:
+                    book_data = read_json_file(
+                        book_json_path.name, relative_path=book_dir.name
+                    )
+                except Exception as e:
+                    logger.error(f"Error loading JSON for {book_json_path}: {e}")
+                    continue  # Skip this book
+
+                # Validate required fields
+                if "book_title" not in book_data or "book_id" not in book_data:
+                    continue  # Skip if title or book_id is missing
+
+                books_list.append(
+                    {
+                        "book_id": str(book_data["book_id"]),
+                        "book_title": book_data["book_title"],
+                        "json_url": generate_presigned_url(
+                            f"{book_data['book_id']}/{book_data['book_id']}.json",
+                            expiration=3600,
+                        ),
+                        "expires_at": datetime.now(timezone.utc) + expiration_time,
+                        "images": [
+                            {
+                                "page": page,
+                                "url": generate_presigned_url(
+                                    f"{book_data['book_id']}/images/{page}.png",
+                                    expiration=3600,
+                                ),
+                                "expires_at": expires_at,
+                            }
+                            for page in book_data.get("pages", [])
+                        ],
+                    }
+                )
+        except Exception as e:
+            logger.exception(f"Unexpected error listing books: {e}")
+            return books_list
+
+    return books_list
+
+
+def get_book_by_id(book_id: str) -> Dict[str, Any]:
+    """
+    Fetches metadata and pre-signed URLs for a specific book by its ID.
+
+    Args:
+        book_id (str): The unique identifier for the book.
+
+    Returns:
+        Dict[str, Any]: Metadata and pre-signed URLs for the book.
+    """
+    try:
+        logger.debug(f"get_book_by_id(): getting book by id: {book_id}")
+        if settings.use_cloud_storage:
+            # Use GCS logic
+            client = get_gcs_client()
+            bucket = client.bucket(settings.gcs_bucket_name)
+            logger.debug(f"get_book_by_id():got client and bucket")
+
+            # Locate the JSON metadata for the book
+            book_blob_name = f"{book_id}/{book_id}.json"
+            book_blob = bucket.blob(book_blob_name)
+            logger.debug(
+                f"get_book_by_id(): set `book_blob_name` {book_blob_name} and `book_blob`"
+            )
+
+            if not book_blob.exists():
+                raise ValueError(f"Book with ID {book_id} not found in GCS.")
+
+            logger.debug(f"get_book_by_id(): `book_id` '{book_id}' exists in GCS.")
+            # Generate pre-signed URL for the JSON metadata
+            json_url = generate_presigned_url(book_blob_name, expiration=3600)
+            logger.debug(
+                f"get_book_by_id(): presigned url generated for `book_id`: {json_url}"
+            )
+
+            # Load metadata from the blob
+            book_blob.reload()
+            metadata = book_blob.metadata or {}
+            book_title = metadata.get("book_title", "Unknown Title")
+            logger.debug(
+                f"get_book_by_id(): `book_blob` reloaded. `metadata` set. `book_title` set."
+            )
+
+            # Locate and generate pre-signed URLs for images
+            image_blobs = list(bucket.list_blobs(prefix=f"{book_id}/images/"))
+            expiration_time = timedelta(hours=1)
+            expires_at = datetime.now(timezone.utc) + expiration_time
+
+            images = [
+                {
+                    "page": int(image_blob.name.split("/")[-1].replace(".png", "")),
+                    "url": generate_presigned_url(image_blob.name, expiration=3600),
+                    "expires_at": expires_at,
+                }
+                for image_blob in image_blobs
+            ]
+
+            # Construct and return the book's metadata and URLs
+            return {
+                "book_id": book_id,
+                "book_title": book_title,
+                "json_url": json_url,
+                "expires_at": expires_at,
+                "images": images,
+            }
+        else:
+            # Use local storage logic
+            local_data_path = Path(settings.local_data_path)
+            if not local_data_path.exists():
+                raise ValueError(f"Local data directory not found at {local_data_path}")
+
+            # Locate the book directory
+            book_dir = local_data_path / book_id
+            if not book_dir.exists():
+                raise ValueError(f"Book with ID {book_id} not found in local storage.")
+
+            # Locate the JSON metadata file
+            json_files = [f for f in book_dir.iterdir() if f.suffix == ".json"]
+            if not json_files:
+                raise ValueError(f"No metadata file found for book ID {book_id}.")
+
+            book_json_path = json_files[0]
+            try:
+                book_data = read_json_file(book_json_path, relative_path=book_id)
+            except Exception as e:
+                raise ValueError(f"Error reading JSON for {book_json_path}: {e}")
+
+            # Extract metadata and construct response
+            book_title = book_data.get("book_title", "Unknown Title")
+            expiration_time = timedelta(hours=1)
+            expires_at = datetime.now(timezone.utc) + expiration_time
+
+            images = [
+                {
+                    "page": page,
+                    "url": str(
+                        (book_dir / f"images/{page}.png").resolve()
+                    ),  # Local path
+                    "expires_at": expires_at,
+                }
+                for page in book_data.get("pages", [])
+            ]
+
+            return {
+                "book_id": book_id,
+                "book_title": book_title,
+                "json_url": str(book_json_path.resolve()),  # Local path
+                "expires_at": expires_at,
+                "images": images,
+            }
+
+    except ValueError as e:
+        logger.error(f"ValueError in get_book_by_id: {e}")
+        raise
+    except Exception as e:
+        logger.exception(f"Unexpected error fetching book with ID {book_id}: {e}")
+        raise
+
+
+def generate_presigned_url(blob_name: str, expiration: int = 3600) -> str:
+    """
+    Generates a pre-signed URL for a blob in Google Cloud Storage.
+
+    Args:
+        blob_name (str): Path to the blob in the GCS bucket.
+        expiration (int): URL expiration time in seconds (default: 3600 seconds [1 hour]).
+
+    Returns:
+        str: A pre-signed URL for the blob.
+    """
+    try:
+        bucket_name = settings.gcs_bucket_name
+        if not bucket_name:
+            raise ValueError("GCS bucket name is not configured.")
+
+        client = get_gcs_client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+
+        # Generate the signed URL
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(seconds=expiration),
+            method="GET",
         )
-        gcs_bucket_name: str = "kwento-books"  # GCS bucket name
-        gcs_service_account_json: str = (
-            get_gcs_cred_file_path()
-        )  # Path GCP storage service account JSON key
-
-        class Config:
-            env_file = ".env"
-
-    settings = Settings()
-
-    ensure_directory_exists("antons_moon_adventure")
+        return url
+    except Exception as e:
+        logger.error(f"Error generating pre-signed URL: {e}")
+        raise

@@ -35,8 +35,9 @@ def get_gcs_cred_file_path() -> str:
 
 class Settings(BaseSettings):
     openai_api_key: str
+    local_data_path: str = "local_data"
     use_cloud_storage: bool = (
-        True  # Default to False; set to True to use Google Cloud Storage
+        False  # Default to False; set to True to use Google Cloud Storage
     )
     gcs_bucket_name: str = "kwento-books"  # GCS bucket name
     gcs_service_account_json: str = (
@@ -49,3 +50,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+settings.use_cloud_storage = True

@@ -1,45 +1,8 @@
 """
-backend/src/api/models/book_models.py
-==============
-
 This module defines the data models for the Kwento backend API, representing the core
 entities involved in managing books, their pages, characters, and associated content.
 Utilizing Pydantic's `BaseModel`, the module ensures data validation, type checking,
 and provides utility methods for managing relationships between different entities.
-
-Usage:
-    The models defined in this module are intended to be used as part of the Kwento backend
-    API for managing book-related data. They can be instantiated, validated, and manipulated
-    as per the application's requirements, ensuring consistent and reliable data handling.
-
-Example:
-    ```python
-    from book_models import Book, Page, PageContent, Character
-
-    # Create characters
-    hero = Character(name="Aria", description="A brave protagonist.", appearance="Tall with flowing hair.")
-    villain = Character(name="Drake", description="The antagonist of the story.", appearance="Short and stern.")
-
-    # Create page content
-    content = PageContent(
-        text_content_of_this_page="Aria enters the dark forest.",
-        illustration="forest_illustration.png",
-        characters_in_this_page=["Aria"]
-    )
-
-    # Create a page
-    page = Page(page_number=1, content=content)
-
-    # Create a book
-    book = Book(
-        book_title="The Brave Aria",
-        book_length_n_pages=100,
-        characters=[hero, villain],
-        plot_synopsis="A tale of bravery and adventure.",
-        pages=[page],
-        illustration_style="Watercolor"
-    )
-    ```
 """
 
 # backend/src/api/models/book_models.py
@@ -50,6 +13,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, validator
 import logging
 from uuid import UUID, uuid4
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -90,12 +54,8 @@ class PageContent(BaseModel):
     illustration_prompt: Optional[str] = None
     illustration_prompt_system_revised: Optional[str] = None
     illustration: Optional[str] = None  # URL or path to the saved image
-    # Remove or deprecate the following if not needed
-    illustration_image: Optional[bytes] = (
-        None  # Deprecated: Use illustration URL instead
-    )
     illustration_b64_data: Optional[str] = (
-        None  # Deprecated: Use illustration URL instead
+        None  # TODO: determine if this can be removed
     )
 
     def assign_page_parent(self, page_parent: Page) -> None:
@@ -197,18 +157,32 @@ class Book(BaseModel):
         logger.info(f"Removed page {page_number} from book '{self.book_title}'.")
 
 
-# Update the response models accordingly
-class PageResponse(BaseModel):
-    page_number: int
-    text_content: str
-    illustration: Optional[str] = None  # Include the illustration URL
-    characters: List[str]
+class BookCreateRequest(BaseModel):
+    theme: str
 
 
-class BookResponseModel(BaseModel):
-    book_id: UUID
-    title: str
-    pages: List[PageResponse]
+# TODO: deprecated, delete after testing
+# class PageResponse(BaseModel):
+#     page_number: int
+#     text_content: str
+#     illustration: Optional[str] = None  # illustration URL or path
+#     characters: List[str]
+
+
+class ImageResponse(BaseModel):
+    page: int
+    url: str
+    expires_at: datetime
+
+
+class BookResponse(BaseModel):
+    book_id: str
+    book_title: str
+    expires_at: datetime  # Expiration timestamp for the JSON URL
+    json_url: str  # Pre-signed URL for the book's JSON metadata
+    images: List[
+        ImageResponse
+    ]  # List of images with their URLs and expiration metadata
 
 
 # Add the following lines to resolve forward references

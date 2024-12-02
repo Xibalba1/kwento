@@ -1,13 +1,11 @@
 # backend/src/services/image_service.py
 
 import logging
-from typing import Optional
 
 from utils.general_utils import (
     save_binary_file,
     save_binary_file_to_gcs,
-    get_gcs_file_url,
-    construct_storage_path,
+    generate_presigned_url,
 )
 from config import settings
 
@@ -16,29 +14,30 @@ logger = logging.getLogger(__name__)
 
 def save_image_to_cloud(image_data: bytes, relative_filepath: str) -> str:
     """
-    Save image data to Google Cloud Storage.
+    Save image data to Google Cloud Storage and return a pre-signed URL.
 
     Args:
         image_data (bytes): The binary data of the image.
         relative_filepath (str): The path within the bucket where the image will be saved.
 
     Returns:
-        str: The public HTTP URL where the image was saved.
+        str: A pre-signed URL for the uploaded image.
     """
     try:
         blob_name = save_binary_file_to_gcs(
             file_name=relative_filepath.split("/")[-1],
             content=image_data,
             relative_path="/".join(relative_filepath.split("/")[:-1]),
+            content_type="image/png",
         )
 
         logger.info(f"Saved image to GCS at {blob_name}")
 
-        # Use get_gcs_file_url to get the public HTTP URL
-        public_url = get_gcs_file_url(blob_name)
-        logger.info(f"Public URL for the image: {public_url}")
+        # Use generate_presigned_url instead of get_gcs_file_url
+        presigned_url = generate_presigned_url(blob_name, expiration=3600)
+        logger.info(f"Generated pre-signed URL for the image: {presigned_url}")
 
-        return public_url
+        return presigned_url
     except Exception as e:
         logger.error(f"Error saving image to cloud: {e}")
         raise
@@ -69,27 +68,24 @@ def save_image_locally(image_data: bytes, relative_filepath: str) -> str:
         raise
 
 
-def save_image(
-    image_data: bytes, relative_filepath: str, save_where: Optional[str] = None
-) -> str:
+def save_image(image_data: bytes, relative_filepath: str) -> str:
     """
     Save image data either locally or to the cloud based on the save_where parameter.
 
     Args:
         image_data (bytes): The binary data of the image.
         relative_filepath (str): The relative path (from project root) or filename where the image will be saved.
-        save_where (str, optional): Destination to save the image. Options: "local", "cloud".
 
     Returns:
         str: The path or URL where the image was saved.
     """
-    if save_where is None:
-        save_where = "cloud" if settings.use_cloud_storage else "local"
-
-    if save_where == "local":
-        return save_image_locally(image_data, relative_filepath)
-    elif save_where == "cloud":
-        return save_image_to_cloud(image_data, relative_filepath)
-    else:
-        logger.error(f"Invalid save_where parameter: {save_where}")
-        raise ValueError("save_where must be either 'local' or 'cloud'")
+    try:
+        if settings.use_cloud_storage == False:
+            return save_image_locally(image_data, relative_filepath)
+        elif settings.use_cloud_storage == True:
+            return save_image_to_cloud(image_data, relative_filepath)
+        else:
+            logger.error(f"Unable to determine save destination (local or cloud)")
+            raise ValueError("`settings.use_cloud_storage` must have a value.")
+    except Exception as e:
+        logger.info(f"Failed to save image with exception {e}")
