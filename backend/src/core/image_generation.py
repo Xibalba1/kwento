@@ -8,6 +8,7 @@ import copy
 
 from config import settings
 from services import openai_service, image_service
+from openai import BadRequestError
 from api.models.book_models import Page
 from core.prompts import prompts as pt
 from utils.general_utils import (
@@ -65,7 +66,13 @@ async def generate_single_page_illustration(
             f"generate_single_page_illustration(): book.page.illustration set to {saved_path} for page number {page.page_number}"
         )
 
-        return {"image_data": image_b64}
+        # return {"image_data": image_b64}
+        return {"image_data": None}
+    except BadRequestError as bre:
+        if "content_policy_violation" in str(bre):
+            raise ValueError(
+                f"Content policy violation when generating image: {bre}"
+            ) from bre
     except Exception as e:
         logger.error(f"Error generating illustration for page {page.page_number}: {e}")
         raise

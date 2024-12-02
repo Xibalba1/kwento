@@ -74,6 +74,12 @@ async def create_book(book_request: BookCreateRequest):
 
         logger.info(f"Successfully constructed response for book: {book.book_title}")
         return response
+    except ValueError as ve:
+        if str(ve) == "Content policy violation":
+            raise HTTPException(
+                status_code=400,
+                detail="The content of your request violates our content policy. Please try a different theme.",
+            )
     except Exception as e:
         logger.exception("Failed to create book.")
         raise HTTPException(status_code=500, detail="Book creation failed.")

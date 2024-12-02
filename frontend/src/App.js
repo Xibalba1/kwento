@@ -13,7 +13,6 @@ const App = () => {
   const [isModalOpen, setIsModalOpen] = useState(false); // Controls BookModal visibility
   const [isLibraryOpen, setIsLibraryOpen] = useState(false); // Controls BookList visibility
 
-
   // Handler to generate a new book based on the theme
   const handleGenerateBook = async () => {
     if (!theme.trim()) {
@@ -31,7 +30,9 @@ const App = () => {
         body: JSON.stringify({ theme }),
       });
       if (!response.ok) {
-        throw new Error("Failed to generate book");
+        const errorData = await response.json();
+        alert(errorData.detail || "Error generating book. Please try again.");
+        return;
       }
       const data = await response.json();
 
@@ -93,10 +94,10 @@ const App = () => {
     setBook(null); // Reset the book state
   };
 
-    // Handler to open the BookList modal
+  // Handler to open the BookList modal
   const handleOpenLibrary = () => {
-      setIsLibraryOpen(true);
-    };
+    setIsLibraryOpen(true);
+  };
 
   // Handler to close the BookList modal
   const handleCloseLibrary = () => {
