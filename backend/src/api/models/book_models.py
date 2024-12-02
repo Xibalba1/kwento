@@ -161,14 +161,6 @@ class BookCreateRequest(BaseModel):
     theme: str
 
 
-# TODO: deprecated, delete after testing
-# class PageResponse(BaseModel):
-#     page_number: int
-#     text_content: str
-#     illustration: Optional[str] = None  # illustration URL or path
-#     characters: List[str]
-
-
 class ImageResponse(BaseModel):
     page: int
     url: str
