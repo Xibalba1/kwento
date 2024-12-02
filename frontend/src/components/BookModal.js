@@ -2,23 +2,26 @@
 
 import React, { useState, useEffect } from "react";
 
-const BookModal = ({ book, onClose }) => {
+const BookModal = ({ book, onClose, onBackToLibrary }) => {
   const [currentPage, setCurrentPage] = useState(0); // Zero-based index
 
   // Reset to first page whenever a new book is loaded
   useEffect(() => {
     setCurrentPage(0);
-    console.log("New book loaded. Resetting to first page.");
+    console.log("BookModal.js: New book loaded. Resetting to first page.");
   }, [book]);
 
   // Log current page data for debugging
   useEffect(() => {
     if (book && book.pages && book.pages[currentPage]) {
       const page = book.pages[currentPage];
-      console.log(`Current Page (${currentPage + 1}):`, page);
+      console.log(
+        `BookModal.js::useEffect(): Current Page (${currentPage + 1}):`,
+        page
+      );
     } else {
       console.log(
-        `No page data available for current page index: ${currentPage}`
+        `BookModal.js::useEffect(): No page data available for current page index: ${currentPage}`
       );
     }
   }, [currentPage, book]);
@@ -35,36 +38,60 @@ const BookModal = ({ book, onClose }) => {
   const handleNext = () => {
     if (currentPage < totalPages - 1) {
       setCurrentPage((prev) => prev + 1);
-      console.log(`Navigated to next page: ${currentPage + 2}`);
+      console.log(
+        `BookModal.js::handleNext(): Navigated to next page: ${currentPage + 2}`
+      );
     }
   };
 
   const handlePrev = () => {
     if (currentPage > 0) {
       setCurrentPage((prev) => prev - 1);
-      console.log(`Navigated to previous page: ${currentPage}`);
+      console.log(
+        `BookModal.js::handlePrev(): Navigated to previous page: ${currentPage}`
+      );
     }
   };
 
   const handleClose = () => {
     onClose();
     setCurrentPage(0); // Reset to first page when modal is closed
-    console.log("Book modal closed. Resetting current page.");
+    console.log(
+      "BookModal.js::handleClose(): Book modal closed. Resetting current page."
+    );
   };
 
   // Safeguard: Ensure page fields exist
-  const textContent = page.text_content || "No content available.";
-  const illustrationData = page.illustration_b64_data || "";
-  const characters = page.characters || [];
+  const textContent =
+    page.content?.text_content_of_this_page || "No content available.";
+  const currentPageNumber = page.page_number;
+  const imageObj = book.images.find((img) => img.page === currentPageNumber);
+  const illustrationUrl = imageObj?.url || "";
 
-  console.log("Rendering Page:", currentPage + 1);
-  console.log("Text Content:", textContent);
-  console.log("Illustration Data Length:", illustrationData.length);
-  console.log("Characters on Page:", characters);
+  console.log(
+    `BookModal.js: Page ${currentPage + 1} illustrationUrl:`,
+    illustrationUrl
+  );
+  console.log(
+    `BookModal.js: Page ${currentPage + 1} content:`,
+    page.content
+  );
+
+  console.log("BookModal.js: Rendering Page:", currentPage + 1);
+  console.log("BookModal.js: Text Content:", textContent);
 
   return (
     <div style={styles.overlay}>
       <div style={styles.modal}>
+        {/* Back to Library Button */}
+        <button
+          onClick={onBackToLibrary}
+          style={styles.backButton}
+          aria-label="Back to Library"
+        >
+          &#8592; Library {/* Left arrow and text */}
+        </button>
+
         {/* Close Button */}
         <button
           onClick={handleClose}
@@ -75,17 +102,18 @@ const BookModal = ({ book, onClose }) => {
         </button>
 
         {/* Book Title */}
-        <h2 style={styles.title}>{book.title}</h2>
+        <h2 style={styles.title}>{book.book_title}</h2>
 
         {/* Image Display */}
-        {illustrationData ? (
+        {illustrationUrl ? (
           <img
-            src={`data:image/png;base64,${illustrationData}`}
-            alt={`Illustration for page ${page.page_number}`}
+            src={illustrationUrl}
+            alt={`Illustration for page ${currentPageNumber}`}
             style={styles.image}
             onError={(e) => {
               console.error(
-                `Failed to load image for page ${page.page_number}`
+                `Failed to load image for page ${currentPageNumber}`,
+                e
               );
               e.target.onerror = null; // Prevent infinite loop if fallback also fails
               e.target.src = "";
@@ -233,6 +261,17 @@ const styles = {
     fontSize: "14px",
     color: "#555",
     marginTop: "10px",
+  },
+  backButton: {
+    position: "absolute",
+    top: "10px",
+    left: "10px",
+    background: "transparent",
+    border: "none",
+    fontSize: "18px",
+    cursor: "pointer",
+    opacity: 0.6,
+    transition: "opacity 0.2s",
   },
 };
 

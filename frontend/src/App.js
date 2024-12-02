@@ -3,13 +3,16 @@
 import React, { useState } from "react";
 import ThemeInput from "./components/ThemeInput";
 import BookModal from "./components/BookModal";
+import BookList from "./components/BookList";
 
 const App = () => {
   const [theme, setTheme] = useState("");
   const [book, setBook] = useState(null);
   const [loading, setLoading] = useState(false);
   const [existingBookLoading, setExistingBookLoading] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false); // State to control BookModal visibility
+  const [isModalOpen, setIsModalOpen] = useState(false); // Controls BookModal visibility
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false); // Controls BookList visibility
+
 
   // Handler to generate a new book based on the theme
   const handleGenerateBook = async () => {
@@ -31,8 +34,22 @@ const App = () => {
         throw new Error("Failed to generate book");
       }
       const data = await response.json();
-      setBook(data);
-      setIsModalOpen(true); // Open the BookModal with the new book
+
+      // Fetch the complete book data from json_url
+      const bookDataResponse = await fetch(data.json_url);
+      if (!bookDataResponse.ok) {
+        throw new Error("Failed to fetch book data from json_url");
+      }
+      const bookData = await bookDataResponse.json();
+
+      // Combine the initial data with the fetched book data
+      const completeBookData = {
+        ...data,
+        ...bookData,
+      };
+
+      setBook(completeBookData);
+      setIsModalOpen(true);
     } catch (error) {
       console.error(error);
       setBook(null);
@@ -60,6 +77,9 @@ const App = () => {
       setIsModalOpen(true); // Open the BookModal with the fetched book
     } catch (error) {
       console.error(error);
+      console.log(
+        `App.js::handleGetRandomBook(): failed to get random book with error ${error}`
+      );
       setBook(null);
       alert("Error fetching existing book. Please try again.");
     } finally {
@@ -71,6 +91,16 @@ const App = () => {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setBook(null); // Reset the book state
+  };
+
+    // Handler to open the BookList modal
+  const handleOpenLibrary = () => {
+      setIsLibraryOpen(true);
+    };
+
+  // Handler to close the BookList modal
+  const handleCloseLibrary = () => {
+    setIsLibraryOpen(false);
   };
 
   // Handler to fetch a book by ID (triggered from BookList modal)
@@ -87,15 +117,38 @@ const App = () => {
         throw new Error("Failed to fetch the selected book");
       }
       const data = await response.json();
-      setBook(data);
-      setIsModalOpen(true); // Open the BookModal with the fetched book
+
+      // Fetch the complete book data from json_url
+      const bookDataResponse = await fetch(data.json_url);
+      if (!bookDataResponse.ok) {
+        throw new Error("Failed to fetch book data from json_url");
+      }
+      const bookData = await bookDataResponse.json();
+
+      // Combine the initial data with the fetched book data
+      const completeBookData = {
+        ...data,
+        ...bookData,
+      };
+
+      setBook(completeBookData);
+      setIsModalOpen(true);
     } catch (error) {
-      console.error(error);
+      console.error(
+        `App.js::handleSelectBook(): Failed to get book ID ${bookId} with error`,
+        error
+      );
       setBook(null);
       alert("Error fetching the book. Please try again.");
     } finally {
       setExistingBookLoading(false);
     }
+  };
+
+  // Handler to navigate back to the library from BookModal
+  const handleBackToLibrary = () => {
+    handleCloseModal();
+    handleOpenLibrary();
   };
 
   return (
@@ -106,11 +159,26 @@ const App = () => {
         setTheme={setTheme}
         onSubmit={handleGenerateBook}
         loading={loading}
-        onSelectBook={handleSelectBook} // Pass the handler to ThemeInput
+        onSelectBook={handleSelectBook}
+        onOpenLibrary={handleOpenLibrary} // Pass the handler to ThemeInput
       />
 
       {/* Render the BookModal if a book is selected and modal is open */}
-      {isModalOpen && book && <BookModal book={book} onClose={handleCloseModal} />}
+      {isModalOpen && book && (
+        <BookModal
+          book={book}
+          onClose={handleCloseModal}
+          onBackToLibrary={handleBackToLibrary} // Pass the handler to BookModal
+        />
+      )}
+
+      {/* Render the BookList modal if it is open */}
+      {isLibraryOpen && (
+        <BookList
+          onSelectBook={handleSelectBook}
+          onClose={handleCloseLibrary}
+        />
+      )}
     </div>
   );
 };

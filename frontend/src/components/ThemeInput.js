@@ -3,18 +3,16 @@
 import React, { useState, useEffect, useRef } from "react";
 import BookList from "./BookList";
 
-const ThemeInput = ({ theme, setTheme, onSubmit, loading, onSelectBook }) => {
-  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+const ThemeInput = ({
+  theme,
+  setTheme,
+  onSubmit,
+  loading,
+  onSelectBook,
+  onOpenLibrary,
+}) => {
   const [sparks, setSparks] = useState([]);
   const sparkIdRef = useRef(0); // To generate unique IDs for sparks
-
-  const handleLibraryOpen = () => {
-    setIsLibraryOpen(true);
-  };
-
-  const handleLibraryClose = () => {
-    setIsLibraryOpen(false);
-  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -225,20 +223,12 @@ const ThemeInput = ({ theme, setTheme, onSubmit, loading, onSelectBook }) => {
         </button>
         <button
           type="button"
-          onClick={handleLibraryOpen}
+          onClick={onOpenLibrary}
           style={styles.libraryButton}
         >
           My Library
         </button>
       </form>
-
-      {/* BookList Modal */}
-      {isLibraryOpen && (
-        <BookList
-          onSelectBook={onSelectBook} // Use the handler passed from App.js
-          onClose={handleLibraryClose}
-        />
-      )}
     </div>
   );
 };

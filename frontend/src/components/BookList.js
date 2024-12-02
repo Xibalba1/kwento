@@ -10,11 +10,13 @@ const BookList = ({ onSelectBook, onClose }) => {
   useEffect(() => {
     const fetchBooks = async () => {
       try {
+        console.log("Getting books list.")
         const response = await fetch('http://localhost:8000/books/', {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
         });
         if (!response.ok) {
+          console.log("Book list retrieval failed.")
           throw new Error('Failed to fetch books');
         }
         const data = await response.json();
@@ -81,22 +83,22 @@ const BookList = ({ onSelectBook, onClose }) => {
 
         {/* Book List */}
         <ul style={styles.list}>
-          {books.map((book) => (
-            <li key={book.book_id} style={styles.listItem}>
-              <button
-                style={styles.bookButton}
-                onClick={() => {
-                  onSelectBook(book.book_id);
-                  onClose(); // Close the BookList modal after selection
-                }}
-              >
-                <span style={styles.bookIcon} role="img" aria-label="Book">
-                  📚
-                </span>
-                <span style={styles.bookTitle}>{book.title}</span>
-              </button>
-            </li>
-          ))}
+        {books.map((book) => (
+          <li key={book.book_id} style={styles.listItem}>
+            <button
+              style={styles.bookButton}
+              onClick={() => {
+                onSelectBook(book.book_id);
+                onClose(); // Close the BookList modal after selection
+              }}
+            >
+              <span style={styles.bookIcon} role="img" aria-label="Book">
+                📚
+              </span>
+              <span style={styles.bookTitle}>{book.book_title}</span>
+            </button>
+          </li>
+        ))}
         </ul>
       </div>
     </div>
