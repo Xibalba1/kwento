@@ -1,14 +1,32 @@
 /* frontend/src/index.css */
-body {
+/* body {
   margin: 0;
   font-family: "Roboto", sans-serif;
   background-color: #ffcc00;
-  /* font-family: 'Pangolin', cursive; */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+} */
+
+body {
+  margin: 0;
+  font-family: "Roboto", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+	width: 100vw;
+	height: 100vh;
+	background: linear-gradient(334deg, #FFCC00, #CA054D, #1B9AAA);
+	background-size: 180% 180%;
+	animation: gradient-animation 6s ease infinite;
 }
 
-/* code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
-} */
+@keyframes gradient-animation {
+	0% {
+		background-position: 0% 50%;
+	}
+	50% {
+		background-position: 100% 50%;
+	}
+	100% {
+		background-position: 0% 50%;
+	}
+}

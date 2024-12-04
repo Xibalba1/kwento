@@ -8,7 +8,6 @@ const ThemeInput = ({
   setTheme,
   onSubmit,
   loading,
-  onSelectBook,
   onOpenLibrary,
 }) => {
   const [sparks, setSparks] = useState([]);
@@ -248,6 +247,7 @@ const styles = {
     border: "1px solid #ccc",
     fontSize: "16px",
     marginBottom: "10px",
+    boxShadow: "rgba(0, 0, 0, 0.25) 1.95px 1.95px 2.6px",
   },
   generateButton: {
     padding: "10px 20px",
@@ -264,6 +264,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
+    boxShadow: "rgba(0, 0, 0, 0.25) 1.95px 1.95px 2.6px",
   },
   libraryButton: {
     padding: "10px 20px",
@@ -276,6 +277,7 @@ const styles = {
     cursor: "pointer",
     transition: "background-color 0.2s",
     marginBottom: "10px",
+    boxShadow: "rgba(0, 0, 0, 0.25) 1.95px 1.95px 2.6px",
   },
 };
 

@@ -155,7 +155,7 @@ const App = () => {
   return (
     <div style={styles.container}>
       <h1 style={styles.mainTitle}>Kwento</h1>
-      <h2 style={styles.subTitle}>Never ending children's books</h2>
+      <h2 style={styles.subTitle}>Where every child’s story comes to life.</h2>
       <ThemeInput
         theme={theme}
         setTheme={setTheme}
@@ -202,11 +202,14 @@ const styles = {
   mainTitle: {
     fontSize: "48px",
     margin: "0",
+    color: "#ffcc00",
+    textShadow: "#FC0 1px 0 1px",
   },
   subTitle: {
     fontSize: "24px",
     margin: "10px 0",
-    color: "#555",
+    color: "#ffcc00",
+    textShadow: "#FC0 1px 0 1px",
   },
 
 };

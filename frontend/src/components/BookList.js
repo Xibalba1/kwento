@@ -10,13 +10,13 @@ const BookList = ({ onSelectBook, onClose }) => {
   useEffect(() => {
     const fetchBooks = async () => {
       try {
-        console.log("Getting books list.")
+        console.log("Getting books list.");
         const response = await fetch('http://localhost:8000/books/', {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
         });
         if (!response.ok) {
-          console.log("Book list retrieval failed.")
+          console.log("Book list retrieval failed.");
           throw new Error('Failed to fetch books');
         }
         const data = await response.json();
@@ -83,22 +83,19 @@ const BookList = ({ onSelectBook, onClose }) => {
 
         {/* Book List */}
         <ul style={styles.list}>
-        {books.map((book) => (
-          <li key={book.book_id} style={styles.listItem}>
-            <button
-              style={styles.bookButton}
-              onClick={() => {
-                onSelectBook(book.book_id);
-                onClose(); // Close the BookList modal after selection
-              }}
-            >
-              <span style={styles.bookIcon} role="img" aria-label="Book">
-                📚
-              </span>
-              <span style={styles.bookTitle}>{book.book_title}</span>
-            </button>
-          </li>
-        ))}
+          {books.map((book) => (
+            <li key={book.book_id} style={styles.listItem}>
+              <button
+                style={styles.bookButton}
+                onClick={() => {
+                  onSelectBook(book.book_id);
+                  onClose(); // Close the BookList modal after selection
+                }}
+              >
+                <span style={styles.bookTitle}>{book.book_title}</span>
+              </button>
+            </li>
+          ))}
         </ul>
       </div>
     </div>
@@ -115,22 +112,24 @@ const styles = {
     backgroundColor: "rgba(0, 0, 0, 0.6)", // Semi-transparent background
     display: "flex",
     justifyContent: "center",
-    alignItems: "center",
+    alignItems: "center", // Keep modal centered vertically
     zIndex: 1000, // Ensure the modal is on top
-    overflowY: "auto",
     padding: "20px",
+    // Removed overflowY from overlay
   },
   modal: {
     position: "relative",
-    width: "90%", // Occupies most vertical area
-    maxWidth: "600px", // Adjust as needed for horizontal space
-    backgroundColor: "#1b9aaa",
+    width: "90%",
+    maxWidth: "600px",
+    backgroundColor: "#CA054D",
     borderRadius: "10px",
     padding: "30px",
-    boxShadow: "0 5px 15px rgba(0,0,0,0.3)",
+    paddingBottom: "30px", // Extra padding at the bottom
+    boxShadow:"rgba(0, 0, 0, 0.25) 0px 54px 55px, rgba(0, 0, 0, 0.12) 0px -12px 30px, rgba(0, 0, 0, 0.12) 0px 4px 6px, rgba(0, 0, 0, 0.17) 0px 12px 13px, rgba(0, 0, 0, 0.09) 0px -3px 5px",
     display: "flex",
     flexDirection: "column",
-    maxHeight: "90vh",
+    maxHeight: "90vh", // Re-added maxHeight to constrain modal height
+    overflowY: "auto", // Enable internal scrolling if content overflows
   },
   closeButton: {
     position: "absolute",
@@ -146,43 +145,41 @@ const styles = {
     marginBottom: "20px",
     textAlign: "center",
     fontSize: "24px",
-    color: "#CA054D",
+    color: "#FFCC00",
   },
   list: {
-    listStyleType: "none",
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: '15px',
+    listStyleType: 'none',
     padding: 0,
     margin: 0,
-    flexGrow: 1,
-    overflowY: "auto",
   },
   listItem: {
-    marginBottom: "15px",
+    // No additional styles needed
   },
   bookButton: {
     display: "flex",
     alignItems: "center",
+    justifyContent: "center",
+    flexDirection: 'column',
     width: "100%",
-    padding: "10px 15px",
-    // backgroundColor: "#f5f5f5",
+    minHeight: '120px',
+    padding: "25px",
     backgroundColor: "#FFCC00",
     border: "none",
     borderRadius: "8px",
     cursor: "pointer",
     transition: "background-color 0.2s",
-    textAlign: "left",
-  },
-  bookButtonHover: {
-    backgroundColor: "#e0e0e0",
-  },
-  bookIcon: {
-    marginRight: "10px",
-    fontSize: "24px",
+    textAlign: "center",
+    boxShadow: "rgba(0, 0, 0, 0.15) 1.95px 1.95px 2.6px",
   },
   bookTitle: {
-    fontSize: "18px",
-    color: "#333",
+    fontSize: "20px",
+    color: "#CA054D",
     wordBreak: "break-word",
-    maxWidth: "80%", // Ensures wrapping for long titles
+    overflowWrap: "break-word",
+    width: '100%',
   },
   message: {
     textAlign: "center",
