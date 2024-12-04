@@ -214,7 +214,7 @@ const styles = {
   },
   image: {
     maxWidth: "100%",
-    maxHeight: "60%",
+    maxHeight: "80%",
     objectFit: "contain",
     marginTop: "10px",
     marginBottom: "10px",

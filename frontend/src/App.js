@@ -154,14 +154,15 @@ const App = () => {
 
   return (
     <div style={styles.container}>
-      <h1>Kwento - Book Generator</h1>
+      <h1 style={styles.mainTitle}>Kwento</h1>
+      <h2 style={styles.subTitle}>Never ending children's books</h2>
       <ThemeInput
         theme={theme}
         setTheme={setTheme}
         onSubmit={handleGenerateBook}
         loading={loading}
         onSelectBook={handleSelectBook}
-        onOpenLibrary={handleOpenLibrary} // Pass the handler to ThemeInput
+        onOpenLibrary={handleOpenLibrary}
       />
 
       {/* Render the BookModal if a book is selected and modal is open */}
@@ -198,6 +199,16 @@ const styles = {
     border: "none",
     borderRadius: "4px",
   },
+  mainTitle: {
+    fontSize: "48px",
+    margin: "0",
+  },
+  subTitle: {
+    fontSize: "24px",
+    margin: "10px 0",
+    color: "#555",
+  },
+
 };
 
 export default App;

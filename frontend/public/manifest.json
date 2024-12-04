@@ -1,6 +1,6 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "Kwento",
+  "name": "Kwento - An endless children's book library",
   "icons": [
     {
       "src": "favicon.ico",

@@ -124,7 +124,7 @@ const styles = {
     position: "relative",
     width: "90%", // Occupies most vertical area
     maxWidth: "600px", // Adjust as needed for horizontal space
-    backgroundColor: "#fff",
+    backgroundColor: "#1b9aaa",
     borderRadius: "10px",
     padding: "30px",
     boxShadow: "0 5px 15px rgba(0,0,0,0.3)",
@@ -146,7 +146,7 @@ const styles = {
     marginBottom: "20px",
     textAlign: "center",
     fontSize: "24px",
-    color: "#6200EE",
+    color: "#CA054D",
   },
   list: {
     listStyleType: "none",
@@ -163,7 +163,8 @@ const styles = {
     alignItems: "center",
     width: "100%",
     padding: "10px 15px",
-    backgroundColor: "#f5f5f5",
+    // backgroundColor: "#f5f5f5",
+    backgroundColor: "#FFCC00",
     border: "none",
     borderRadius: "8px",
     cursor: "pointer",

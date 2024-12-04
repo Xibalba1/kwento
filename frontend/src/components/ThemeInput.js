@@ -252,7 +252,7 @@ const styles = {
   generateButton: {
     padding: "10px 20px",
     marginLeft: "10px",
-    backgroundColor: "#6200EE",
+    backgroundColor: "#1B9AAA",
     color: "#fff",
     border: "none",
     borderRadius: "4px",
@@ -268,7 +268,7 @@ const styles = {
   libraryButton: {
     padding: "10px 20px",
     marginLeft: "10px",
-    backgroundColor: "#03DAC5",
+    backgroundColor: "#CA054D",
     color: "#fff",
     border: "none",
     borderRadius: "4px",
