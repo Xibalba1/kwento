@@ -21,6 +21,8 @@
 # Miscellaneous
 .DS_Store
 .env
+directory_structure_and_contents*.txt
+backend_traverse_and_output_directory_contents.py
 
 # react
 packages/react-devtools-core/dist

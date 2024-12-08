@@ -125,7 +125,8 @@ def get_gcs_client() -> storage.Client:
         storage.Client: An instance of Google Cloud Storage client.
     """
     try:
-        credentials = service_account.Credentials.from_service_account_file(
+
+        credentials = service_account.Credentials.from_service_account_info(
             settings.gcs_service_account_json
         )
         client = storage.Client(credentials=credentials, project=credentials.project_id)

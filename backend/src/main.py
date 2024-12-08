@@ -3,11 +3,11 @@ import logging
 from config import settings
 
 logging.basicConfig(level=settings.logging_level)
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routers import books
+
 
 app = FastAPI(title="Kwento API", version="1.0.0")
 
