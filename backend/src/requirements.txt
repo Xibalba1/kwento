@@ -1,3 +1,6 @@
+# this requirements.txt file is constructured from the pyproject.toml file in the parent directory
+# while `backend` is managed using poetry (i.e. pyproject.toml) we need 
+# a requirements.txt file in `src` to enable deployment on railway.app
 anyio==4.6.2.post1 ; python_version >= "3.11" and python_version < "4.0"
 attrs==24.2.0 ; python_version >= "3.11" and python_version < "4.0"
 cachetools==5.5.0 ; python_version >= "3.11" and python_version < "4.0"
