@@ -6,10 +6,12 @@ from utils.general_utils import (
     save_binary_file,
     save_binary_file_to_gcs,
     generate_presigned_url,
+    get_logger,
 )
 from config import settings
 
-logger = logging.getLogger(__name__)
+
+logger = get_logger(__name__)
 
 
 def save_image_to_cloud(image_data: bytes, relative_filepath: str) -> str:

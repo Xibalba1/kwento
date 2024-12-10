@@ -11,11 +11,12 @@ from __future__ import annotations
 
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, validator
-import logging
+from utils.general_utils import get_logger
 from uuid import UUID, uuid4
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
+
+logger = get_logger(__name__)
 
 
 class Character(BaseModel):

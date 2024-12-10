@@ -8,14 +8,41 @@ from typing import List, Dict, Any
 import json
 from datetime import datetime, timedelta, timezone
 
-logger = logging.getLogger(__name__)
-
 try:
     from config import settings
 except Exception as e:
     print(
         f"Unable to import settings. Application cannot function without this data: {e}"
     )
+
+
+class CustomRailwayLogFormatter(logging.Formatter):
+    def format(self, record):
+        log_record = {
+            "time": self.formatTime(record),
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "module": record.name,
+        }
+        return json.dumps(log_record)
+
+
+def get_logger(module_name):
+    """
+    Modifies logger for Railway deployment.
+    """
+    logger = logging.getLogger(module_name)
+    logger.setLevel(settings.logging_level)
+    handler = logging.StreamHandler()
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    formatter = CustomRailwayLogFormatter()
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger
+
+
+logger = get_logger(__name__)
 
 
 def get_project_root() -> Path:

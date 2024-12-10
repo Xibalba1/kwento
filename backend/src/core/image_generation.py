@@ -15,10 +15,11 @@ from utils.general_utils import (
     ensure_directory_exists,
     write_json_file,
     construct_storage_path,
+    get_logger,
 )
 from api.models.helpers import remove_book_model_relationships
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def make_illustration_prompt(page: Page) -> str:

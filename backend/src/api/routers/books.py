@@ -6,8 +6,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from typing import List, Dict, Any
 from datetime import datetime, timedelta, timezone
-import logging
 
+from utils.general_utils import get_logger
 from config import settings
 from api.models.book_models import Book, BookResponse, BookCreateRequest, ImageResponse
 from core import content_generation
@@ -18,8 +18,13 @@ from utils.general_utils import (
     generate_presigned_url,
 )
 
+
+from utils.general_utils import get_logger
+
 router = APIRouter()
-logger = logging.getLogger(__name__)
+
+
+logger = get_logger(__name__)
 
 
 @router.post("/", response_model=BookResponse)

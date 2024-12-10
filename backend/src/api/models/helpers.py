@@ -1,9 +1,9 @@
 # backend/src/api/models/helpers.py
 
 from .book_models import Book
-import logging
+from utils.general_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def assign_book_model_relationships(book: Book) -> Book:

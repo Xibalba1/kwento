@@ -15,16 +15,16 @@ Functions:
 import openai
 from typing import Optional, Dict, Any
 import time
-import logging
 import requests
 from PIL import Image
 import io
 from fastapi import HTTPException
 
 from config import settings
+from utils.general_utils import get_logger
 
 # initialize logger for this module
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Set the OpenAI API key from configuration
 openai.api_key = settings.openai_api_key

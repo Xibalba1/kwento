@@ -2,7 +2,6 @@
 
 import json
 import random
-import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from config import settings
@@ -12,9 +11,9 @@ from api.models.book_models import Book
 from api.models.helpers import assign_book_model_relationships
 from core.prompts import prompts as pt
 from core.image_generation import generate_page_illustrations
-from utils.general_utils import generate_presigned_url
+from utils.general_utils import generate_presigned_url, get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def generate_book(theme: str) -> Book:
