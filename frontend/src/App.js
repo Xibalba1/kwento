@@ -24,11 +24,14 @@ const App = () => {
     setBook(null);
 
     try {
-      const response = await fetch("https://kwento-production.up.railway.app/books/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ theme }),
-      });
+      const response = await fetch(
+        "https://kwento-production.up.railway.app/books/",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ theme }),
+        }
+      );
       if (!response.ok) {
         const errorData = await response.json();
         alert(errorData.detail || "Error generating book. Please try again.");
@@ -60,7 +63,6 @@ const App = () => {
     }
   };
 
-
   // Handler to close the BookModal
   const handleCloseModal = () => {
     setIsModalOpen(false);
@@ -83,10 +85,13 @@ const App = () => {
     setBook(null);
 
     try {
-      const response = await fetch(`https://kwento-production.up.railway.app/books/${bookId}/`, {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-      });
+      const response = await fetch(
+        `https://kwento-production.up.railway.app/books/${bookId}/`,
+        {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+        }
+      );
       if (!response.ok) {
         throw new Error("Failed to fetch the selected book");
       }
@@ -184,7 +189,6 @@ const styles = {
     color: "#ffcc00",
     textShadow: "#FC0 1px 0 1px",
   },
-
 };
 
 export default App;
