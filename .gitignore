@@ -49,6 +49,7 @@ secrets
 backend/test_scratch_3.py
 
 # vs code
+*.vscode*
 *launch.json*
 *settings.json*
 backend/test_scratch_3.py
