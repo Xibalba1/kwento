@@ -11,7 +11,7 @@ const BookList = ({ onSelectBook, onClose }) => {
     const fetchBooks = async () => {
       try {
         console.log("Getting books list.");
-        const response = await fetch('http://localhost:8000/books/', {
+        const response = await fetch('https://kwento-production.up.railway.app/books/', {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
         });

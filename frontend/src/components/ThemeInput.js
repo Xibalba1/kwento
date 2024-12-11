@@ -1,7 +1,6 @@
 // kwento/frontend/src/components/ThemeInput.js
 
 import React, { useState, useEffect, useRef } from "react";
-import BookList from "./BookList";
 
 const ThemeInput = ({
   theme,

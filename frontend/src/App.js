@@ -24,7 +24,7 @@ const App = () => {
     setBook(null);
 
     try {
-      const response = await fetch("http://localhost:8000/books/", {
+      const response = await fetch("https://kwento-production.up.railway.app/books/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ theme }),
@@ -66,7 +66,7 @@ const App = () => {
     setBook(null);
 
     try {
-      const response = await fetch("http://localhost:8000/books/random/", {
+      const response = await fetch("https://kwento-production.up.railway.app/books/random/", {
         method: "GET",
         headers: { "Content-Type": "application/json" },
       });
@@ -110,7 +110,7 @@ const App = () => {
     setBook(null);
 
     try {
-      const response = await fetch(`http://localhost:8000/books/${bookId}/`, {
+      const response = await fetch(`https://kwento-production.up.railway.app/books/${bookId}/`, {
         method: "GET",
         headers: { "Content-Type": "application/json" },
       });
