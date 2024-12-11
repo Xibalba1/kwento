@@ -102,7 +102,7 @@ async def generate_image(prompt: str) -> Optional[Dict[str, Any]]:
             logger.error(
                 f"Error generating image: {e}. Retrying ({attempt + 1}/{max_retries})..."
             )
-            sleep(retry_delay_secs)
+            await sleep(retry_delay_secs)
     # Raise HTTPException if all retries fail
     raise HTTPException(
         status_code=500, detail=f"Error generating image after retries."
