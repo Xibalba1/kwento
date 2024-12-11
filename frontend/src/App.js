@@ -9,7 +9,7 @@ const App = () => {
   const [theme, setTheme] = useState("");
   const [book, setBook] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [existingBookLoading, setExistingBookLoading] = useState(false);
+  const setExistingBookLoading = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false); // Controls BookModal visibility
   const [isLibraryOpen, setIsLibraryOpen] = useState(false); // Controls BookList visibility
 
@@ -61,32 +61,32 @@ const App = () => {
   };
 
   // Handler to fetch a random existing book
-  const handleGetRandomBook = async () => {
-    setExistingBookLoading(true);
-    setBook(null);
+  // const handleGetRandomBook = async () => {
+  //   setExistingBookLoading(true);
+  //   setBook(null);
 
-    try {
-      const response = await fetch("https://kwento-production.up.railway.app/books/random/", {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!response.ok) {
-        throw new Error("Failed to fetch an existing book");
-      }
-      const data = await response.json();
-      setBook(data);
-      setIsModalOpen(true); // Open the BookModal with the fetched book
-    } catch (error) {
-      console.error(error);
-      console.log(
-        `App.js::handleGetRandomBook(): failed to get random book with error ${error}`
-      );
-      setBook(null);
-      alert("Error fetching existing book. Please try again.");
-    } finally {
-      setExistingBookLoading(false);
-    }
-  };
+  //   try {
+  //     const response = await fetch("https://kwento-production.up.railway.app/books/random/", {
+  //       method: "GET",
+  //       headers: { "Content-Type": "application/json" },
+  //     });
+  //     if (!response.ok) {
+  //       throw new Error("Failed to fetch an existing book");
+  //     }
+  //     const data = await response.json();
+  //     setBook(data);
+  //     setIsModalOpen(true); // Open the BookModal with the fetched book
+  //   } catch (error) {
+  //     console.error(error);
+  //     console.log(
+  //       `App.js::handleGetRandomBook(): failed to get random book with error ${error}`
+  //     );
+  //     setBook(null);
+  //     alert("Error fetching existing book. Please try again.");
+  //   } finally {
+  //     setExistingBookLoading(false);
+  //   }
+  // };
 
   // Handler to close the BookModal
   const handleCloseModal = () => {
