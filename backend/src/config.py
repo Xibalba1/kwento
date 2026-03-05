@@ -1,25 +1,30 @@
 # backend/src/config.py
 
 from pydantic import BaseSettings
+from pathlib import Path
 import base64
 import json
 from typing import Optional
 import logging
 
 
+ENV_FILE = Path(__file__).resolve().parent / ".env"
+
+
 class Settings(BaseSettings):
     openai_api_key: str
     gcs_api_key_json_b64: str
     local_data_path: str = "local_data"
-    use_cloud_storage: bool = (
-        False  # Default to False; set to True to use Google Cloud Storage
-    )
+    use_cloud_storage: bool = True  # Default to True; set to False to use local storage
     gcs_bucket_name: str = "kwento-books"  # GCS bucket name
     logging_level = logging.INFO
     gcs_service_account_json: Optional[str]
+    enable_generation_progress_estimation: bool = True
+    generation_progress_log_interval_seconds: int = 10
 
     class Config:
-        env_file = ".env"
+        env_file = str(ENV_FILE)
+        env_file_encoding = "utf-8"
 
 
 def set_gcs_cred_info_from_b64(settings: Settings) -> Settings:

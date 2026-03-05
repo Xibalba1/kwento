@@ -90,4 +90,5 @@ def save_image(image_data: bytes, relative_filepath: str) -> str:
             logger.error(f"Unable to determine save destination (local or cloud)")
             raise ValueError("`settings.use_cloud_storage` must have a value.")
     except Exception as e:
-        logger.info(f"Failed to save image with exception {e}")
+        logger.error(f"Failed to save image with exception {e}")
+        raise

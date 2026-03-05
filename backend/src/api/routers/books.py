@@ -85,6 +85,8 @@ async def create_book(book_request: BookCreateRequest):
                 status_code=400,
                 detail="The content of your request violates our content policy. Please try a different theme.",
             )
+        logger.exception("Failed to create book due to a value error.")
+        raise HTTPException(status_code=500, detail=f"Book creation failed: {ve}")
     except Exception as e:
         logger.exception("Failed to create book.")
         raise HTTPException(status_code=500, detail="Book creation failed.")

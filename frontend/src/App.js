@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import ThemeInput from "./components/ThemeInput";
 import BookModal from "./components/BookModal";
 import BookList from "./components/BookList";
+import { buildApiUrl } from "./config";
 
 const App = () => {
   const [theme, setTheme] = useState("");
@@ -25,7 +26,7 @@ const App = () => {
 
     try {
       const response = await fetch(
-        "https://kwento-production.up.railway.app/books/",
+        buildApiUrl("/books/"),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -33,8 +34,7 @@ const App = () => {
         }
       );
       if (!response.ok) {
-        const errorData = await response.json();
-        alert(errorData.detail || "Error generating book. Please try again.");
+        alert("Error generating book. Please try again.");
         return;
       }
       const data = await response.json();
@@ -86,7 +86,7 @@ const App = () => {
 
     try {
       const response = await fetch(
-        `https://kwento-production.up.railway.app/books/${bookId}/`,
+        buildApiUrl(`/books/${bookId}/`),
         {
           method: "GET",
           headers: { "Content-Type": "application/json" },

@@ -1,7 +1,8 @@
 # backend/src/core/image_generation.py
 
 import json
-import logging
+
+# import logging
 from typing import Dict, Any
 import base64
 import copy
@@ -18,6 +19,7 @@ from utils.general_utils import (
     get_logger,
 )
 from api.models.helpers import remove_book_model_relationships
+from core.progress_estimation import GenerationProgressEstimator
 
 logger = get_logger(__name__)
 
@@ -79,7 +81,9 @@ async def generate_single_page_illustration(
         raise
 
 
-async def generate_page_illustrations(book) -> Dict[int, Any]:
+async def generate_page_illustrations(
+    book, progress: GenerationProgressEstimator = None
+) -> Dict[int, Any]:
     """
     Generates illustrations for all pages in a book and saves them appropriately.
     """
@@ -104,13 +108,19 @@ async def generate_page_illustrations(book) -> Dict[int, Any]:
     logger.info(f"Directories ensured for book '{book.book_title}'")
 
     # Generate illustrations for each page
-    for page in book.pages:
+    total_pages = len(book.pages)
+    for idx, page in enumerate(book.pages, start=1):
         illustration_prompt = make_illustration_prompt(page)
         image_data = await generate_single_page_illustration(
             page, illustration_prompt, images_dir
         )
         illustrations[page.page_number] = image_data
         logger.info(f"Generated illustration for page {page.page_number}")
+        if progress:
+            progress.mark_work_completed(
+                1.0,
+                note=f"Illustration generated for page {idx}/{total_pages}.",
+            )
 
     # Save book JSON at the root of book_dir
     book_copy_no_refs = remove_book_model_relationships(copy.deepcopy(book))
@@ -125,5 +135,8 @@ async def generate_page_illustrations(book) -> Dict[int, Any]:
     filename = f"{book_id_str}.json"
     write_json_file(filename, book_data, relative_path=book_dir, metadata=metadata)
     logger.info(f"Saved book JSON for '{book.book_title}'")
+    if progress:
+        progress.set_stage("persisting_book_data")
+        progress.mark_work_completed(1.0, note="Book JSON persisted.")
 
     return illustrations

@@ -1,6 +1,7 @@
 // kwento/frontend/src/components/BookList.js
 
 import React, { useEffect, useState } from 'react';
+import { buildApiUrl } from "../config";
 
 const BookList = ({ onSelectBook, onClose }) => {
   const [books, setBooks] = useState([]);
@@ -11,7 +12,7 @@ const BookList = ({ onSelectBook, onClose }) => {
     const fetchBooks = async () => {
       try {
         console.log("Getting books list.");
-        const response = await fetch('https://kwento-production.up.railway.app/books/', {
+        const response = await fetch(buildApiUrl('/books/'), {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
         });

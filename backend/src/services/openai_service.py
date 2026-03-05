@@ -55,7 +55,7 @@ async def get_book_response(prompt_content: str) -> Optional[Dict[str, Any]]:
                 }
             ],
             response_format={"type": "json_object"},
-            model="gpt-4o",
+            model="gpt-5-mini",
         )
         msg_content = response.choices[0].message.content
         return msg_content
