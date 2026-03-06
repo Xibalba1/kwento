@@ -1,13 +1,13 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from src.core.content_generation import generate_book
 from src.api.models.book_models import Book
 
 
 @pytest.mark.asyncio
 @patch("src.core.content_generation.generate_page_illustrations")
-@patch("src.core.content_generation.openai_service.get_book_response")
-async def test_generate_book(mock_get_book_response, mock_generate_page_illustrations):
+@patch("src.core.content_generation.build_text_generator")
+async def test_generate_book(mock_build_text_generator, mock_generate_page_illustrations):
     # Mock OpenAI's response for get_book_response
     assistant_message = """
     {
@@ -41,7 +41,9 @@ async def test_generate_book(mock_get_book_response, mock_generate_page_illustra
         ]
     }
     """
-    mock_get_book_response.return_value = assistant_message
+    mock_generator = MagicMock()
+    mock_generator.generate_book_response = AsyncMock(return_value=assistant_message)
+    mock_build_text_generator.return_value = mock_generator
 
     # Mock generate_page_illustrations
     mock_generate_page_illustrations.return_value = {
@@ -66,6 +68,6 @@ async def test_generate_book(mock_get_book_response, mock_generate_page_illustra
     assert book.pages[1].content.text_content_of_this_page == "Testy finds a treasure."
     assert book.pages[1].content.illustration == "http://example.com/image2.png"
 
-    # Ensure the OpenAI functions were called
-    mock_get_book_response.assert_called_once()
+    # Ensure the text + image generation functions were called
+    mock_generator.generate_book_response.assert_awaited_once()
     mock_generate_page_illustrations.assert_called_once()

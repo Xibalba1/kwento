@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from config import settings
 from typing import Dict, Any
-from services import openai_service
+from services.text_generation_provider import build_text_generator
 from api.models.book_models import Book
 from api.models.helpers import assign_book_model_relationships
 from core.prompts import prompts as pt
@@ -35,7 +35,8 @@ async def generate_book(theme: str) -> Book:
         prompt_content = f"{master_prompt}\n{output_example}"
 
         # Get the book response
-        assistant_message = await openai_service.get_book_response(prompt_content)
+        text_generator = build_text_generator()
+        assistant_message = await text_generator.generate_book_response(prompt_content)
 
         # Parse the assistant's message into a Book object
         try:

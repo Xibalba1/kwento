@@ -32,7 +32,9 @@ logger = get_logger(__name__)
 openai.api_key = settings.openai_api_key
 
 
-async def get_book_response(prompt_content: str) -> Optional[Dict[str, Any]]:
+async def get_book_response(
+    prompt_content: str, model: Optional[str] = None
+) -> str:
     """
     Generates a response based on the given prompt content using OpenAI's Chat API.
 
@@ -40,8 +42,7 @@ async def get_book_response(prompt_content: str) -> Optional[Dict[str, Any]]:
         prompt_content (str): The input text prompt for generating a book-like response.
 
     Returns:
-        Optional[Dict[str, Any]]: Generated message content as a dictionary if successful,
-                                  None if an error occurs.
+        str: Generated message content as a JSON string if successful.
 
     Raises:
         HTTPException: Raised with a 500 status code if OpenAI API fails.
@@ -55,7 +56,7 @@ async def get_book_response(prompt_content: str) -> Optional[Dict[str, Any]]:
                 }
             ],
             response_format={"type": "json_object"},
-            model=settings.openai_text_model,
+            model=model or settings.openai_text_model,
         )
         msg_content = response.choices[0].message.content
         return msg_content

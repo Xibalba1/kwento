@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     image_generation_strategy: Literal["legacy", "seeded_reference_edit"] = (
         "seeded_reference_edit"
     )
+    text_provider: Literal["google", "openai", "anthropic", "xai"] = "google"
     image_provider: Literal["google", "openai", "anthropic", "xai"] = "google"
     openai_text_model: str = "gpt-5-mini"
     openai_image_model: str = "dall-e-3"
