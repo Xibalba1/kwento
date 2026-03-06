@@ -29,9 +29,12 @@ class ImageGenerationPipelineError(RuntimeError):
     pass
 
 
-def make_illustration_prompt(page: Page) -> str:
+def make_illustration_prompt(page: Page, include_style: bool = True) -> str:
     illustration_prompt = pt.PROMPT_PAGE_ILLUSTRATION_BODY.copy()
-    illustration_prompt["illustration_style"] = page.book_parent.illustration_style
+    if include_style:
+        illustration_prompt["illustration_style"] = page.book_parent.illustration_style
+    else:
+        illustration_prompt.pop("illustration_style", None)
     illustration_prompt["illustration_description"] = page.content.illustration
     illustration_prompt["characters_in_illustration"] = [
         {"name": cinfo.name, "appearance": cinfo.appearance}
@@ -146,7 +149,10 @@ class SeededReferenceEditStrategy(IllustrationStrategy):
 
         for idx, page in enumerate(book.pages, start=1):
             try:
-                illustration_prompt = make_illustration_prompt(page)
+                # For seeded strategy, include explicit style only for seed page.
+                illustration_prompt = make_illustration_prompt(
+                    page, include_style=(idx == 1)
+                )
                 reference_images = [seed_image_bytes] if seed_image_bytes else None
                 request = ImageGenerationRequest(
                     prompt=illustration_prompt,

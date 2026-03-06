@@ -1,4 +1,5 @@
 import uuid
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,7 @@ from src.services.image_generation_provider import (
     ImageGenerationRequest,
     ImageGenerationResponse,
 )
+from src.core.prompts import prompts as pt
 
 
 class FakeImageGenerator:
@@ -99,3 +101,15 @@ async def test_seeded_strategy_uses_seed_reference_for_subsequent_pages(monkeypa
     assert fake_generator.requests[0].reference_images is None
     assert fake_generator.requests[1].reference_images == [b"seed-bytes"]
     assert fake_generator.requests[2].reference_images == [b"seed-bytes"]
+
+    prompt_one = fake_generator.requests[0].prompt
+    prompt_two = fake_generator.requests[1].prompt
+    prompt_three = fake_generator.requests[2].prompt
+
+    body_one = json.loads(prompt_one[len(pt.PROMPT_PAGE_ILLUSTRATION_PREFACE) :].strip())
+    body_two = json.loads(prompt_two[len(pt.PROMPT_PAGE_ILLUSTRATION_PREFACE) :].strip())
+    body_three = json.loads(prompt_three[len(pt.PROMPT_PAGE_ILLUSTRATION_PREFACE) :].strip())
+
+    assert "illustration_style" in body_one
+    assert "illustration_style" not in body_two
+    assert "illustration_style" not in body_three
