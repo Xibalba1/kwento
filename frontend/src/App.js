@@ -1,10 +1,12 @@
 // kwento/frontend/src/App.js
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ThemeInput from "./components/ThemeInput";
 import BookModal from "./components/BookModal";
 import BookList from "./components/BookList";
 import { buildApiUrl } from "./config";
+
+const LIBRARY_CACHE_KEY = "kwento_library_books_v1";
 
 const App = () => {
   const [theme, setTheme] = useState("");
@@ -13,6 +15,104 @@ const App = () => {
   const [, setExistingBookLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false); // Controls BookModal visibility
   const [isLibraryOpen, setIsLibraryOpen] = useState(false); // Controls BookList visibility
+  const [libraryBooks, setLibraryBooks] = useState([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryError, setLibraryError] = useState(false);
+  const [libraryHydrated, setLibraryHydrated] = useState(false);
+  const libraryFetchPromiseRef = useRef(null);
+
+  const upsertBookInLibrary = (bookData) => {
+    if (!bookData || !bookData.book_id) {
+      return;
+    }
+
+    setLibraryBooks((previousBooks) => {
+      const existingIndex = previousBooks.findIndex(
+        (existingBook) => existingBook.book_id === bookData.book_id
+      );
+      if (existingIndex >= 0) {
+        const nextBooks = [...previousBooks];
+        nextBooks[existingIndex] = { ...nextBooks[existingIndex], ...bookData };
+        return nextBooks;
+      }
+
+      return [
+        {
+          book_id: bookData.book_id,
+          book_title: bookData.book_title,
+          ...bookData,
+        },
+        ...previousBooks,
+      ];
+    });
+  };
+
+  const fetchLibraryBooks = async ({ force = false } = {}) => {
+    if (libraryFetchPromiseRef.current && !force) {
+      return libraryFetchPromiseRef.current;
+    }
+
+    const fetchPromise = (async () => {
+      setLibraryLoading(true);
+      setLibraryError(false);
+      try {
+        const response = await fetch(buildApiUrl("/books/"), {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch books. status=${response.status}`);
+        }
+
+        const books = await response.json();
+        setLibraryBooks(Array.isArray(books) ? books : []);
+      } catch (error) {
+        console.error("Failed to prefetch library books:", error);
+        setLibraryError(true);
+      } finally {
+        setLibraryLoading(false);
+      }
+    })();
+
+    libraryFetchPromiseRef.current = fetchPromise;
+    try {
+      await fetchPromise;
+    } finally {
+      libraryFetchPromiseRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    // Hydrate from cache immediately to avoid blank library on first open.
+    try {
+      const cachedLibraryRaw = localStorage.getItem(LIBRARY_CACHE_KEY);
+      if (cachedLibraryRaw) {
+        const parsed = JSON.parse(cachedLibraryRaw);
+        if (Array.isArray(parsed)) {
+          setLibraryBooks(parsed);
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to hydrate cached library books:", error);
+    } finally {
+      setLibraryHydrated(true);
+    }
+
+    // Always refresh in background; this does not block UI interactions.
+    fetchLibraryBooks();
+  }, []);
+
+  useEffect(() => {
+    if (!libraryHydrated) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(LIBRARY_CACHE_KEY, JSON.stringify(libraryBooks));
+    } catch (error) {
+      console.warn("Failed to persist cached library books:", error);
+    }
+  }, [libraryBooks, libraryHydrated]);
 
   // Handler to generate a new book based on the theme
   const handleGenerateBook = async () => {
@@ -53,6 +153,7 @@ const App = () => {
       };
 
       setBook(completeBookData);
+      upsertBookInLibrary(completeBookData);
       setIsModalOpen(true);
     } catch (error) {
       console.error(error);
@@ -111,6 +212,7 @@ const App = () => {
       };
 
       setBook(completeBookData);
+      upsertBookInLibrary(completeBookData);
       setIsModalOpen(true);
     } catch (error) {
       console.error(
@@ -155,6 +257,10 @@ const App = () => {
       {/* Render the BookList modal if it is open */}
       {isLibraryOpen && (
         <BookList
+          books={libraryBooks}
+          loading={libraryLoading}
+          error={libraryError}
+          onRetry={() => fetchLibraryBooks({ force: true })}
           onSelectBook={handleSelectBook}
           onClose={handleCloseLibrary}
         />

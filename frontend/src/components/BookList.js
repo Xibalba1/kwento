@@ -1,37 +1,8 @@
 // kwento/frontend/src/components/BookList.js
 
-import React, { useEffect, useState } from 'react';
-import { buildApiUrl } from "../config";
+import React from 'react';
 
-const BookList = ({ onSelectBook, onClose }) => {
-  const [books, setBooks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    const fetchBooks = async () => {
-      try {
-        console.log("Getting books list.");
-        const response = await fetch(buildApiUrl('/books/'), {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' },
-        });
-        if (!response.ok) {
-          console.log("Book list retrieval failed.");
-          throw new Error('Failed to fetch books');
-        }
-        const data = await response.json();
-        setBooks(data);
-      } catch (error) {
-        console.error(error);
-        setError(true);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchBooks();
-  }, []);
+const BookList = ({ books, loading, error, onRetry, onSelectBook, onClose }) => {
 
   if (loading) {
     return (
@@ -62,6 +33,9 @@ const BookList = ({ onSelectBook, onClose }) => {
             &#10005;
           </button>
           <p style={styles.message}>Error fetching books. Please try again later.</p>
+          <button type="button" style={styles.retryButton} onClick={onRetry}>
+            Retry
+          </button>
         </div>
       </div>
     );
@@ -186,6 +160,17 @@ const styles = {
     textAlign: "center",
     fontSize: "18px",
     color: "#555",
+  },
+  retryButton: {
+    alignSelf: "center",
+    marginTop: "12px",
+    padding: "8px 16px",
+    border: "none",
+    borderRadius: "6px",
+    backgroundColor: "#FFCC00",
+    color: "#CA054D",
+    cursor: "pointer",
+    fontWeight: "600",
   },
 };
 
