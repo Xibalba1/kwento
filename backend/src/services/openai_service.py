@@ -55,7 +55,7 @@ async def get_book_response(prompt_content: str) -> Optional[Dict[str, Any]]:
                 }
             ],
             response_format={"type": "json_object"},
-            model="gpt-5-mini",
+            model=settings.openai_text_model,
         )
         msg_content = response.choices[0].message.content
         return msg_content
@@ -66,7 +66,9 @@ async def get_book_response(prompt_content: str) -> Optional[Dict[str, Any]]:
         )
 
 
-async def generate_image(prompt: str) -> Optional[Dict[str, Any]]:
+async def generate_image(
+    prompt: str, model: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     """
     Generates an image based on a given prompt using OpenAI's Image API with retry logic.
 
@@ -85,7 +87,7 @@ async def generate_image(prompt: str) -> Optional[Dict[str, Any]]:
     for attempt in range(max_retries):
         try:
             response = openai.images.generate(
-                model="dall-e-3",
+                model=model or settings.openai_image_model,
                 prompt=prompt,
                 n=1,
                 size="1024x1024",

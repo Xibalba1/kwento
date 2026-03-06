@@ -2,6 +2,7 @@
 
 import random
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 from typing import List, Dict, Any
@@ -32,6 +33,7 @@ async def create_book(book_request: BookCreateRequest):
     """
     Endpoint to create a new book based on a given theme.
     """
+    request_id = str(uuid4())
     logger.info(f"Received request to create book with theme: '{book_request.theme}'")
     try:
         book = await content_generation.generate_book(book_request.theme)
@@ -85,9 +87,27 @@ async def create_book(book_request: BookCreateRequest):
                 status_code=400,
                 detail="The content of your request violates our content policy. Please try a different theme.",
             )
+        logger.exception(
+            "Book creation failed due to value error. request_id=%s error_type=%s error=%s",
+            request_id,
+            type(ve).__name__,
+            str(ve),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Book creation failed. request_id={request_id}",
+        )
     except Exception as e:
-        logger.exception("Failed to create book.")
-        raise HTTPException(status_code=500, detail="Book creation failed.")
+        logger.exception(
+            "Failed to create book. request_id=%s error_type=%s error=%s",
+            request_id,
+            type(e).__name__,
+            str(e),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Book creation failed. request_id={request_id}",
+        )
 
 
 @router.get("/random/", response_model=BookResponse)
