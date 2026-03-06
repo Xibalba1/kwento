@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol
@@ -87,6 +88,7 @@ class GoogleImageGenerator:
         )
 
     def _generate_sync(self, request: ImageGenerationRequest) -> bytes:
+        self._log_request_observability(request)
         contents: List[Any] = [request.prompt]
         for ref_image_bytes in request.reference_images or []:
             contents.append(Image.open(io.BytesIO(ref_image_bytes)))
@@ -205,6 +207,33 @@ class GoogleImageGenerator:
             )
 
         return summary
+
+    def _log_request_observability(self, request: ImageGenerationRequest) -> None:
+        mode = settings.image_prompt_observability_mode
+        if mode == "off":
+            return
+
+        reference_images = request.reference_images or []
+        max_chars = max(0, settings.image_prompt_log_max_chars)
+        prompt = request.prompt or ""
+        prompt_preview = prompt[:max_chars] if max_chars else ""
+
+        log_payload: Dict[str, Any] = {
+            "provider": self.provider,
+            "model": self.model,
+            "observability_mode": mode,
+            "page_index": request.page_index,
+            "prompt_char_count": len(prompt),
+            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+            "reference_image_count": len(reference_images),
+            "reference_image_sizes_bytes": [len(img) for img in reference_images],
+        }
+
+        if mode == "full":
+            log_payload["prompt_sent_to_gemini"] = prompt_preview
+            log_payload["prompt_truncated"] = len(prompt_preview) < len(prompt)
+
+        logger.info("Gemini image request payload. | gemini_request=%s", log_payload)
 
 
 def build_image_generator(provider: Optional[str] = None) -> ImageGenerator:

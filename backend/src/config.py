@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     openai_image_model: str = "dall-e-3"
     google_text_model: str = "gemini-2.5-flash"
     google_image_model: str = "gemini-2.5-flash-image"
+    image_prompt_observability_mode: Literal["off", "metadata", "full"] = "metadata"
+    image_prompt_log_max_chars: int = 12000
 
     class Config:
         env_file = str(ENV_FILE)
