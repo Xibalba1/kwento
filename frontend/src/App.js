@@ -28,7 +28,7 @@ const App = () => {
 
     setLibraryBooks((previousBooks) => {
       const existingIndex = previousBooks.findIndex(
-        (existingBook) => existingBook.book_id === bookData.book_id
+        (existingBook) => existingBook.book_id === bookData.book_id,
       );
       if (existingIndex >= 0) {
         const nextBooks = [...previousBooks];
@@ -125,14 +125,11 @@ const App = () => {
     setBook(null);
 
     try {
-      const response = await fetch(
-        buildApiUrl("/books/"),
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ theme }),
-        }
-      );
+      const response = await fetch(buildApiUrl("/books/"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ theme }),
+      });
       if (!response.ok) {
         alert("Error generating book. Please try again.");
         return;
@@ -186,13 +183,10 @@ const App = () => {
     setBook(null);
 
     try {
-      const response = await fetch(
-        buildApiUrl(`/books/${bookId}/`),
-        {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+      const response = await fetch(buildApiUrl(`/books/${bookId}/`), {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
       if (!response.ok) {
         throw new Error("Failed to fetch the selected book");
       }
@@ -217,7 +211,7 @@ const App = () => {
     } catch (error) {
       console.error(
         `App.js::handleSelectBook(): Failed to get book ID ${bookId} with error`,
-        error
+        error,
       );
       setBook(null);
       alert("Error fetching the book. Please try again.");
@@ -235,7 +229,7 @@ const App = () => {
   return (
     <div style={styles.container}>
       <h1 style={styles.mainTitle}>Kwento</h1>
-      <h2 style={styles.subTitle}>Where every child’s story comes to life.</h2>
+      <h2 style={styles.subTitle}>Make your story!</h2>
       <ThemeInput
         theme={theme}
         setTheme={setTheme}
