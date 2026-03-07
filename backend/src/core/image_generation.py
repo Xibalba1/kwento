@@ -33,10 +33,16 @@ class ImageGenerationPipelineError(RuntimeError):
 
 def make_illustration_prompt(page: Page, include_style: bool = True) -> str:
     illustration_prompt = pt.PROMPT_PAGE_ILLUSTRATION_BODY.copy()
+    illustration_prompt["SYSTEM_NOTES"] = dict(
+        pt.PROMPT_PAGE_ILLUSTRATION_BODY.get("SYSTEM_NOTES", {})
+    )
     if include_style:
         illustration_prompt["illustration_style"] = page.book_parent.illustration_style
     else:
         illustration_prompt.pop("illustration_style", None)
+        illustration_prompt["SYSTEM_NOTES"]["4"] = (
+            pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE
+        )
     illustration_prompt["illustration_description"] = page.content.illustration
     illustration_prompt["characters_in_illustration"] = [
         {"name": cinfo.name, "appearance": cinfo.appearance}

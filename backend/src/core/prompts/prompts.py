@@ -435,6 +435,12 @@ ILLUSTRATION_STYLE_ATTRIBUTES = [
     },
 ]
 PROMPT_PAGE_ILLUSTRATION_PREFACE = """Create an illustration for children's book according to the following specification (follow the specification *EXACTLY*):"""
+PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE = (
+    "Extract and use the illustration style of the attached image. "
+    "You are *NOT* editing the attached image. "
+    "You are generating a new image as described in `illustration_description` "
+    "and `text_content`."
+)
 PROMPT_PAGE_ILLUSTRATION_BODY = {
     "SYSTEM_NOTES": {
         "1": "*NEVER* depict text in the generated image.",

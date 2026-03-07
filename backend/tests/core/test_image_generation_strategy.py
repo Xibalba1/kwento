@@ -134,6 +134,15 @@ async def test_seeded_strategy_uses_seed_reference_for_subsequent_pages(monkeypa
     assert "illustration_style" in body_one
     assert "illustration_style" not in body_two
     assert "illustration_style" not in body_three
+    assert "4" not in body_one["SYSTEM_NOTES"]
+    assert (
+        body_two["SYSTEM_NOTES"]["4"]
+        == pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE
+    )
+    assert (
+        body_three["SYSTEM_NOTES"]["4"]
+        == pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE
+    )
 
 
 def test_seeded_strategy_worker_count():

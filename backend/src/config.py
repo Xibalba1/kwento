@@ -69,8 +69,10 @@ class Settings(BaseSettings):
             OpenAI model for image generation. Values: any supported OpenAI image model string.
         google_text_model (str):
             Google model for text generation. Values: any supported Google text model string.
+            See: https://ai.google.dev/gemini-api/docs/models
         google_image_model (str):
             Google model for image generation. Values: any supported Google image model string.
+            See: https://ai.google.dev/gemini-api/docs/models
         image_prompt_observability_mode (Literal["off", "metadata", "full"]):
             Prompt observability detail mode. Values: "off", "metadata", "full".
         image_prompt_log_max_chars (int):
@@ -101,7 +103,9 @@ class Settings(BaseSettings):
     openai_text_model: str = "gpt-5-mini"
     openai_image_model: str = "dall-e-3"
     google_text_model: str = "gemini-2.5-flash"
-    google_image_model: str = "gemini-2.5-flash-image"
+    google_image_model: str = (
+        "gemini-3.1-flash-image-preview"  # "gemini-2.5-flash-image"
+    )
     image_prompt_observability_mode: Literal["off", "metadata", "full"] = "metadata"
     image_prompt_log_max_chars: int = 12000
 
