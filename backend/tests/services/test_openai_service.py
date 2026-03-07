@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from src.services.openai_service import generate_image, get_book_response
 import openai
 
@@ -72,3 +72,27 @@ async def test_get_book_response_success(mock_create):
     # Assertions
     mock_create.assert_called_once()
     assert response == '{"book_title": "Test"}'
+
+
+@pytest.mark.asyncio
+@patch("src.services.openai_service.asyncio.to_thread", new_callable=AsyncMock)
+async def test_get_book_response_uses_to_thread(mock_to_thread):
+    mock_to_thread.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(content='{"book_title":"Threaded"}'))]
+    )
+
+    response = await get_book_response("Prompt")
+
+    assert response == '{"book_title":"Threaded"}'
+    assert mock_to_thread.await_count == 1
+
+
+@pytest.mark.asyncio
+@patch("src.services.openai_service.asyncio.to_thread", new_callable=AsyncMock)
+async def test_generate_image_uses_to_thread(mock_to_thread):
+    mock_to_thread.return_value = MagicMock(data=[{"url": "http://example.com/image.png"}])
+
+    response = await generate_image("draw")
+
+    assert response.data[0]["url"] == "http://example.com/image.png"
+    assert mock_to_thread.await_count == 1

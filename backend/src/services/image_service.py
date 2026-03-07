@@ -5,7 +5,6 @@ import logging
 from utils.general_utils import (
     save_binary_file,
     save_binary_file_to_gcs,
-    generate_presigned_url,
     get_logger,
 )
 from config import settings
@@ -16,14 +15,14 @@ logger = get_logger(__name__)
 
 def save_image_to_cloud(image_data: bytes, relative_filepath: str) -> str:
     """
-    Save image data to Google Cloud Storage and return a pre-signed URL.
+    Save image data to Google Cloud Storage and return the blob path.
 
     Args:
         image_data (bytes): The binary data of the image.
         relative_filepath (str): The path within the bucket where the image will be saved.
 
     Returns:
-        str: A pre-signed URL for the uploaded image.
+        str: The blob path of the uploaded image.
     """
     try:
         blob_name = save_binary_file_to_gcs(
@@ -35,11 +34,7 @@ def save_image_to_cloud(image_data: bytes, relative_filepath: str) -> str:
 
         logger.info(f"Saved image to GCS at {blob_name}")
 
-        # Use generate_presigned_url instead of get_gcs_file_url
-        presigned_url = generate_presigned_url(blob_name, expiration=3600)
-        logger.info(f"Generated pre-signed URL for the image: {presigned_url}")
-
-        return presigned_url
+        return blob_name
     except Exception as e:
         logger.error(f"Error saving image to cloud: {e}")
         raise

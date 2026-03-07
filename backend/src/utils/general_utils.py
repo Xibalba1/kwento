@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import logging
+import threading
 from google.cloud import storage
 from google.oauth2 import service_account
 from typing import List, Dict, Any
@@ -45,6 +46,8 @@ def get_logger(module_name):
 
 
 logger = get_logger(__name__)
+_GCS_CLIENT = None
+_GCS_CLIENT_LOCK = threading.Lock()
 
 
 def get_project_root() -> Path:
@@ -153,16 +156,34 @@ def get_gcs_client() -> storage.Client:
     Returns:
         storage.Client: An instance of Google Cloud Storage client.
     """
+    global _GCS_CLIENT
     try:
+        if _GCS_CLIENT is not None:
+            return _GCS_CLIENT
 
-        credentials = service_account.Credentials.from_service_account_info(
-            settings.gcs_service_account_json
-        )
-        client = storage.Client(credentials=credentials, project=credentials.project_id)
-        return client
+        with _GCS_CLIENT_LOCK:
+            if _GCS_CLIENT is not None:
+                return _GCS_CLIENT
+
+            credentials = service_account.Credentials.from_service_account_info(
+                settings.gcs_service_account_json
+            )
+            _GCS_CLIENT = storage.Client(
+                credentials=credentials, project=credentials.project_id
+            )
+            return _GCS_CLIENT
     except Exception as e:
         logger.error(f"Error initializing GCS client: {e}")
         raise
+
+
+def _reset_gcs_client_cache() -> None:
+    """
+    Test helper to reset cached GCS client instance.
+    """
+    global _GCS_CLIENT
+    with _GCS_CLIENT_LOCK:
+        _GCS_CLIENT = None
 
 
 def save_binary_file_to_gcs(

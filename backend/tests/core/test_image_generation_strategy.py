@@ -35,6 +35,27 @@ class FakeImageGenerator:
         )
 
 
+class RetryImageGenerator:
+    provider = "fake"
+    model = "fake-model"
+
+    def __init__(self, failures_before_success: int):
+        self.failures_before_success = failures_before_success
+        self.calls = 0
+        self.requests = []
+
+    async def generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
+        self.calls += 1
+        self.requests.append(request)
+        if self.calls <= self.failures_before_success:
+            raise RuntimeError("transient")
+        return ImageGenerationResponse(
+            image_bytes=b"ok",
+            provider=self.provider,
+            model=self.model,
+        )
+
+
 def _make_page(page_number: int, illustration_text: str):
     content = SimpleNamespace(
         illustration=illustration_text,
@@ -99,8 +120,8 @@ async def test_seeded_strategy_uses_seed_reference_for_subsequent_pages(monkeypa
 
     assert len(fake_generator.requests) == 3
     assert fake_generator.requests[0].reference_images is None
-    assert fake_generator.requests[1].reference_images == [b"seed-bytes"]
-    assert fake_generator.requests[2].reference_images == [b"seed-bytes"]
+    for request in fake_generator.requests[1:]:
+        assert request.reference_images == [b"seed-bytes"]
 
     prompt_one = fake_generator.requests[0].prompt
     prompt_two = fake_generator.requests[1].prompt
@@ -113,3 +134,84 @@ async def test_seeded_strategy_uses_seed_reference_for_subsequent_pages(monkeypa
     assert "illustration_style" in body_one
     assert "illustration_style" not in body_two
     assert "illustration_style" not in body_three
+
+
+def test_seeded_strategy_worker_count():
+    strategy = SeededReferenceEditStrategy(FakeImageGenerator())
+    assert strategy._determine_parallel_workers(0) == 0
+    assert strategy._determine_parallel_workers(1) == 1
+    assert strategy._determine_parallel_workers(2) == 2
+    assert strategy._determine_parallel_workers(3) == 3
+    assert strategy._determine_parallel_workers(10) == 4
+
+
+@pytest.mark.asyncio
+async def test_seeded_strategy_retries_transient_errors(monkeypatch):
+    generator = RetryImageGenerator(failures_before_success=1)
+    strategy = SeededReferenceEditStrategy(generator)
+    book = _make_book()
+
+    monkeypatch.setattr(
+        image_generation.image_service,
+        "save_image",
+        lambda image_data, relative_filepath: f"saved://{relative_filepath}",
+    )
+    monkeypatch.setattr(
+        image_generation.settings,
+        "image_generation_retry_attempts",
+        3,
+    )
+    monkeypatch.setattr(
+        image_generation.settings,
+        "image_generation_retry_backoff_base_seconds",
+        0.0,
+    )
+    monkeypatch.setattr(
+        image_generation.settings,
+        "image_generation_retry_backoff_max_seconds",
+        0.0,
+    )
+    monkeypatch.setattr(
+        image_generation.settings,
+        "image_generation_retry_use_jitter",
+        False,
+    )
+
+    await strategy.generate(book, images_dir="book/images")
+    assert generator.calls >= 4  # 1 failed + 3 successful page generations
+
+
+@pytest.mark.asyncio
+async def test_seeded_strategy_fails_whole_book_after_retries(monkeypatch):
+    generator = RetryImageGenerator(failures_before_success=999)
+    strategy = SeededReferenceEditStrategy(generator)
+    book = _make_book()
+
+    monkeypatch.setattr(
+        image_generation.image_service,
+        "save_image",
+        lambda image_data, relative_filepath: f"saved://{relative_filepath}",
+    )
+    monkeypatch.setattr(
+        image_generation.settings,
+        "image_generation_retry_attempts",
+        3,
+    )
+    monkeypatch.setattr(
+        image_generation.settings,
+        "image_generation_retry_backoff_base_seconds",
+        0.0,
+    )
+    monkeypatch.setattr(
+        image_generation.settings,
+        "image_generation_retry_backoff_max_seconds",
+        0.0,
+    )
+    monkeypatch.setattr(
+        image_generation.settings,
+        "image_generation_retry_use_jitter",
+        False,
+    )
+
+    with pytest.raises(image_generation.ImageGenerationPipelineError):
+        await strategy.generate(book, images_dir="book/images")

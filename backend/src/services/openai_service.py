@@ -16,6 +16,7 @@ import openai
 from typing import Optional, Dict, Any
 
 # import time
+import asyncio
 from asyncio import sleep
 import requests
 from PIL import Image
@@ -48,7 +49,8 @@ async def get_book_response(
         HTTPException: Raised with a 500 status code if OpenAI API fails.
     """
     try:
-        response = openai.chat.completions.create(
+        response = await asyncio.to_thread(
+            openai.chat.completions.create,
             messages=[
                 {
                     "role": "user",
@@ -87,7 +89,8 @@ async def generate_image(
     retry_delay_secs = 5
     for attempt in range(max_retries):
         try:
-            response = openai.images.generate(
+            response = await asyncio.to_thread(
+                openai.images.generate,
                 model=model or settings.openai_image_model,
                 prompt=prompt,
                 n=1,
