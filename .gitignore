@@ -53,3 +53,4 @@ backend/test_scratch_3.py
 *launch.json*
 *settings.json*
 backend/test_scratch_3.py
+backend/scripts/script_outputs/gcs_book_file_metadata_20260306T170949Z.csv
