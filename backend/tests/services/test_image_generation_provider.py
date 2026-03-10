@@ -33,7 +33,9 @@ async def test_google_image_generator_is_mockable_without_network():
     fake_part = SimpleNamespace(inline_data=SimpleNamespace(data=b"google-image-bytes"))
     fake_response = SimpleNamespace(parts=[fake_part])
     fake_client = SimpleNamespace(
-        models=SimpleNamespace(generate_content=lambda model, contents: fake_response)
+        models=SimpleNamespace(
+            generate_content=lambda model, contents, config: fake_response
+        )
     )
 
     seed_img = Image.new("RGB", (1, 1), color="white")

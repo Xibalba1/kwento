@@ -34,6 +34,21 @@ class Character(BaseModel):
     appearance: str
 
 
+class Setting(BaseModel):
+    """
+    Represents a reusable setting anchor for page illustrations.
+
+    Attributes:
+        id (str): Stable setting identifier (for example "S1").
+        name (str): Human-readable setting label.
+        visual_anchor_details (str): Visual details to keep setting depictions consistent.
+    """
+
+    id: str
+    name: str
+    visual_anchor_details: str
+
+
 class PageContent(BaseModel):
     """
     Represents the content of a single page in a book.
@@ -76,6 +91,7 @@ class PageContent(BaseModel):
 
 class Page(BaseModel):
     page_number: int
+    setting_id: Optional[str] = None
     content: PageContent
     book_parent: Optional[Book] = Field(default=None, exclude=True)
 
@@ -108,6 +124,7 @@ class Book(BaseModel):
     book_title: str
     book_length_n_pages: int
     characters: List[Character] = Field(default_factory=list)
+    settings: List[Setting] = Field(default_factory=list)
     plot_synopsis: str
     pages: List[Page] = Field(default_factory=list)
     illustration_style: Optional[Dict[str, Any]] = None

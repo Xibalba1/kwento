@@ -45,6 +45,8 @@ class Settings(BaseSettings):
             Enables periodic generation progress logs. Values: True, False.
         generation_progress_log_interval_seconds (int):
             Progress log interval. Values: positive integers.
+        prompt_path_version (Literal["v1", "v2", "v3"]):
+            Story prompt/schema path selector. Values: "v1", "v2", "v3".
         image_generation_strategy (Literal["legacy", "seeded_reference_edit"]):
             Illustration strategy selector. Values: "legacy", "seeded_reference_edit".
         text_provider (Literal["google", "openai", "anthropic", "xai"]):
@@ -67,12 +69,28 @@ class Settings(BaseSettings):
             OpenAI model for text generation. Values: any supported OpenAI text model string.
         openai_image_model (str):
             OpenAI model for image generation. Values: any supported OpenAI image model string.
+        openai_image_aspect_profile (str):
+            OpenAI image sizing strategy. Values: "portrait_model_aware", "square".
+        openai_image_size_override (Optional[str]):
+            Explicit OpenAI image size override. Values: None or model-supported size string.
+        openai_image_quality_mode (str):
+            OpenAI quality strategy. Values: "medium_model_aware", "auto", "low", "medium", "high", "standard", "hd".
+        openai_image_output_format (str):
+            OpenAI image output format. Values: "b64_json", "url", "png", "jpeg", "webp".
+        openai_image_output_compression (Optional[int]):
+            OpenAI image compression quality for lossy formats. Values: None or integer 0-100.
+        openai_image_background (Optional[str]):
+            OpenAI image background mode. Values: None, "transparent", "opaque", "auto".
         google_text_model (str):
             Google model for text generation. Values: any supported Google text model string.
             See: https://ai.google.dev/gemini-api/docs/models
         google_image_model (str):
             Google model for image generation. Values: any supported Google image model string.
             See: https://ai.google.dev/gemini-api/docs/models
+        google_image_aspect_ratio (str):
+            Gemini image aspect ratio. Values: "1:1","1:4","1:8","2:3","3:2","3:4","4:1","4:3","4:5","5:4","8:1","9:16","16:9","21:9".
+        google_image_size (str):
+            Gemini image size/resolution. Values: "512px", "1K", "2K", "4K".
         image_prompt_observability_mode (Literal["off", "metadata", "full"]):
             Prompt observability detail mode. Values: "off", "metadata", "full".
         image_prompt_log_max_chars (int):
@@ -89,23 +107,36 @@ class Settings(BaseSettings):
     gcs_service_account_json: Optional[str] = None
     enable_generation_progress_estimation: bool = True
     generation_progress_log_interval_seconds: int = 10
+    prompt_path_version: Literal["v1", "v2", "v3"] = "v3"
     image_generation_strategy: Literal["legacy", "seeded_reference_edit"] = (
         "seeded_reference_edit"
     )
-    text_provider: Literal["google", "openai", "anthropic", "xai"] = "google"
-    image_provider: Literal["google", "openai", "anthropic", "xai"] = "google"
+    text_provider: Literal["google", "openai", "anthropic", "xai"] = "openai"
+    image_provider: Literal["google", "openai", "anthropic", "xai"] = "openai"
     image_generation_min_workers: int = 2
     image_generation_max_workers: int = 4
     image_generation_retry_attempts: int = 3
     image_generation_retry_backoff_base_seconds: float = 0.5
     image_generation_retry_backoff_max_seconds: float = 8.0
     image_generation_retry_use_jitter: bool = True
-    openai_text_model: str = "gpt-5-mini"
-    openai_image_model: str = "dall-e-3"
-    google_text_model: str = "gemini-2.5-flash"
-    google_image_model: str = (
-        "gemini-3.1-flash-image-preview"  # "gemini-2.5-flash-image"
+    openai_text_model: str = "gpt-5"
+    openai_image_model: str = "gpt-image-1.5"
+    openai_image_aspect_profile: Literal["portrait_model_aware", "square"] = (
+        "portrait_model_aware"
     )
+    openai_image_size_override: Optional[str] = None
+    openai_image_quality_mode: Literal[
+        "medium_model_aware", "auto", "low", "medium", "high", "standard", "hd"
+    ] = "medium_model_aware"
+    openai_image_output_format: Literal["b64_json", "url", "png", "jpeg", "webp"] = (
+        "b64_json"
+    )
+    openai_image_output_compression: Optional[int] = None
+    openai_image_background: Optional[Literal["transparent", "opaque", "auto"]] = None
+    google_text_model: str = "gemini-3.1-flash-lite-preview"
+    google_image_model: str = "gemini-3.1-flash-image-preview"
+    google_image_aspect_ratio: str = "3:4"
+    google_image_size: str = "2K"
     image_prompt_observability_mode: Literal["off", "metadata", "full"] = "metadata"
     image_prompt_log_max_chars: int = 12000
 

@@ -400,6 +400,7 @@ def get_book_list() -> List[Dict[str, Any]]:
     Returns a list of books, each represented as a dictionary with metadata, pre-signed URLs, and images.
     """
     books_dict = {}
+    books_list: List[Dict[str, Any]] = []
 
     if settings.use_cloud_storage:
         # Use GCS
@@ -418,9 +419,15 @@ def get_book_list() -> List[Dict[str, Any]]:
 
                 # Process JSON files
                 if blob_name.endswith(".json"):
+                    parts = blob_name.split("/")
+                    if len(parts) != 2 or parts[1] != f"{parts[0]}.json":
+                        continue
+
                     # Ensure metadata is loaded
                     blob.reload()
                     metadata = blob.metadata or {}
+                    if metadata.get("artifact_type") not in {None, "book_json"}:
+                        continue
                     book_id = metadata.get("book_id")
                     book_title = metadata.get("book_title")
                     logger.debug(
@@ -503,6 +510,8 @@ def get_book_list() -> List[Dict[str, Any]]:
         try:
             local_data_path = Path(settings.local_data_path)
             logger.debug(f"'local_data_path': {local_data_path}")
+            expiration_time = timedelta(hours=1)
+            expires_at = datetime.now(timezone.utc) + expiration_time
 
             if not local_data_path.exists():
                 logger.error(f"local_data directory not found at {local_data_path}")
@@ -517,10 +526,9 @@ def get_book_list() -> List[Dict[str, Any]]:
 
             for book_dir in book_dirs:
                 # Find the JSON file in the book directory
-                json_files = [f for f in book_dir.iterdir() if f.suffix == ".json"]
-                if not json_files:
+                book_json_path = book_dir / f"{book_dir.name}.json"
+                if not book_json_path.exists():
                     continue  # Skip if no JSON file found
-                book_json_path = json_files[0]
 
                 # Read the JSON file using the utility function
                 try:
@@ -539,21 +547,19 @@ def get_book_list() -> List[Dict[str, Any]]:
                     {
                         "book_id": str(book_data["book_id"]),
                         "book_title": book_data["book_title"],
-                        "json_url": generate_presigned_url(
-                            f"{book_data['book_id']}/{book_data['book_id']}.json",
-                            expiration=3600,
-                        ),
+                        "json_url": str(book_json_path.resolve()),
                         "expires_at": datetime.now(timezone.utc) + expiration_time,
                         "images": [
                             {
-                                "page": page,
-                                "url": generate_presigned_url(
-                                    f"{book_data['book_id']}/images/{page}.png",
-                                    expiration=3600,
+                                "page": page_data["page_number"],
+                                "url": str(
+                                    (book_dir / f"images/{page_data['page_number']}.png").resolve()
                                 ),
                                 "expires_at": expires_at,
                             }
-                            for page in book_data.get("pages", [])
+                            for page_data in book_data.get("pages", [])
+                            if isinstance(page_data, dict)
+                            and isinstance(page_data.get("page_number"), int)
                         ],
                     }
                 )
@@ -641,13 +647,12 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
                 raise ValueError(f"Book with ID {book_id} not found in local storage.")
 
             # Locate the JSON metadata file
-            json_files = [f for f in book_dir.iterdir() if f.suffix == ".json"]
-            if not json_files:
+            book_json_path = book_dir / f"{book_id}.json"
+            if not book_json_path.exists():
                 raise ValueError(f"No metadata file found for book ID {book_id}.")
 
-            book_json_path = json_files[0]
             try:
-                book_data = read_json_file(book_json_path, relative_path=book_id)
+                book_data = read_json_file(book_json_path.name, relative_path=book_id)
             except Exception as e:
                 raise ValueError(f"Error reading JSON for {book_json_path}: {e}")
 
@@ -658,13 +663,15 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
 
             images = [
                 {
-                    "page": page,
+                    "page": page_data["page_number"],
                     "url": str(
-                        (book_dir / f"images/{page}.png").resolve()
+                        (book_dir / f"images/{page_data['page_number']}.png").resolve()
                     ),  # Local path
                     "expires_at": expires_at,
                 }
-                for page in book_data.get("pages", [])
+                for page_data in book_data.get("pages", [])
+                if isinstance(page_data, dict)
+                and isinstance(page_data.get("page_number"), int)
             ]
 
             return {
