@@ -20,10 +20,18 @@ async def test_full_flow(mock_generate_image, mock_get_book_response):
                 "appearance": "Average height with a testing hat"
             }
         ],
+        "settings": [
+            {
+                "id": "S1",
+                "name": "Desk Corner",
+                "visual_anchor_details": "Desk lamp glow, notebook stack, blue chair"
+            }
+        ],
         "plot_synopsis": "Testing the full flow of the application.",
         "pages": [
             {
                 "page_number": 1,
+                "setting_id": "S1",
                 "content": {
                     "text_content_of_this_page": "Flow Tester starts testing.",
                     "illustration": "Flow Tester at a desk.",

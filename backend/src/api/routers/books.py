@@ -36,7 +36,9 @@ async def create_book(book_request: BookCreateRequest):
     request_id = str(uuid4())
     logger.info(f"Received request to create book with theme: '{book_request.theme}'")
     try:
-        book = await content_generation.generate_book(book_request.theme)
+        book = await content_generation.generate_book(
+            book_request.theme, request_id=request_id
+        )
         logger.info(
             f"Generated book titled: '{book.book_title}' with {len(book.pages)} pages."
         )
@@ -145,7 +147,11 @@ async def get_random_book():
         logger.debug(f"Selected book directory: {selected_book_dir}")
 
         # Find the JSON file in the selected directory
-        json_files = [f for f in selected_book_dir.iterdir() if f.suffix == ".json"]
+        json_files = [
+            f
+            for f in selected_book_dir.iterdir()
+            if f.suffix == ".json" and f.name == f"{selected_book_dir.name}.json"
+        ]
         logger.debug(f"Found {len(json_files)} JSON files in selected book directory.")
 
         if not json_files:

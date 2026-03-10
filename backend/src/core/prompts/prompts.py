@@ -39,6 +39,146 @@ OUTPUT FORMAT:
 TEMPLATE_CHILDRENS_BOOK = """```{"book_title":"The title of the book","book_length_n_pages":10,"characters":[{"name":"<Name of character>","description":"Brief description of character personality, behavior, etc.","appearance":"Detailed physical description of character."},{"name":"<Name of character>","description":"Brief description of character personality, behavior, etc.","appearance":"Detailed physical description of character."}],"plot_synopsis":"Plot synopsis.","pages":[{"page_number":1,"content":{"text_content_of_this_page":"Text content of page. Content should adhere to `plot_synopsis` and advance the plot appropriately.","illustration":"Illustration or graphic content of page","characters_in_this_page":["Character Name 1","Character Name 2"]}},{"page_number":2,"content":{"text_content_of_this_page":"Text content of page. Content should adhere to `plot_synopsis` and advance the plot appropriately.","illustration":"Illustration or graphic content of page","characters_in_this_page":["Character Name 1","Character Name 2"]}}]}```
 """
 
+PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS_V2 = """Write a children's picture book in JSON.
+
+CRITICAL OUTPUT RULES
+- Output ONLY valid JSON (no markdown, no code fences, no commentary).
+- Use double quotes for all JSON strings.
+- Do not include any keys outside the schema below.
+- Do not include any dialogue/text inside any "illustration" string.
+- Names are case-sensitive and must match EXACTLY across the JSON.
+
+LENGTH / READING LEVEL CONSTRAINTS (enforced via structure)
+- Choose "book_length_n_pages" as an integer between 10 and 15.
+- The number of entries in "pages" MUST EXACTLY equal "book_length_n_pages".
+- Per page text: 1–3 short sentences total, each sentence <= 20 words.
+- Vocabulary: simple, concrete words; prefer present tense; avoid abstract concepts.
+
+THEME
+{theme}
+
+PLOT REQUIREMENTS
+- The story must have a clear toddler-friendly arc:
+  - Page 1: hook / curiosity moment
+  - Early pages: discovery of a problem or mystery
+  - Middle pages: playful attempts and exploration
+  - Final pages: satisfying resolution and happy ending
+- Include at least 2 setting changes.
+- Include at least one clear choice the character(s) make (shown in page text).
+- Keep the plot relevant to a child's life/imagination (home, yard, park, toys, animals, imagination play).
+
+CHARACTERS (1 to 5 total)
+- Total characters across the entire book: between 1 and 5.
+- "characters" is the single source of truth for character names.
+- Any name used in any page's "characters_in_this_page" MUST appear ONCE AND ONLY ONCE in "characters".
+- "characters_in_this_page" MUST contain ONLY names from "characters" (no nicknames, no roles like "Mom", no new names).
+- Each character must have distinct:
+  - personality/behavior ("description")
+  - physical appearance ("appearance") including 3–5 visual anchors that remain consistent across pages (e.g., hair, outfit, signature item).
+- Do not change outfits or major features unless the page text explicitly says so.
+
+SETTINGS (minimal extra structure)
+- Add a top-level "settings" array.
+- Each setting object must have:
+  - "id" (short string like "S1", "S2", etc.)
+  - "name" (short label)
+  - "visual_anchor_details" (concise but vivid: lighting, key objects, colors, atmosphere)
+- Each page MUST include a "setting_id" that matches one of the "settings" ids.
+- If the setting does not change from the previous page, reuse the same "setting_id".
+- In each page's "illustration", restate the key setting elements so illustrations stay consistent.
+
+ILLUSTRATION GUIDELINES (no text in images)
+- Each page "illustration" MUST include:
+  - camera framing (close-up / medium / wide)
+  - what each character is doing (action/pose)
+    - characters should usually be in motion
+  - facial expression/mood
+  - at least 3 key background elements from the referenced setting
+- Absolutely no written words, letters, numbers, signs, captions, or speech bubbles in the illustration description.
+
+BOOK TITLE
+- Unique, evocative, curiosity-sparking.
+- Avoid generic or overly descriptive titles that summarize the plot.
+
+OUTPUT FORMAT (SCHEMA — do not add/remove keys)
+"""
+
+TEMPLATE_CHILDRENS_BOOK_V2 = """{
+  "book_title": "The title of the book",
+  "book_length_n_pages": 10,
+  "characters": [
+    {
+      "name": "Character Name",
+      "description": "Brief description of personality/behavior.",
+      "appearance": "Detailed physical description including 3–5 consistent visual anchors."
+    }
+  ],
+  "settings": [
+    {
+      "id": "S1",
+      "name": "Setting name",
+      "visual_anchor_details": "Lighting, key objects, colors, atmosphere for visual consistency."
+    }
+  ],
+  "plot_synopsis": "Plot synopsis (<= 60 words).",
+  "pages": [
+    {
+      "page_number": 1,
+      "setting_id": "S1",
+      "content": {
+        "text_content_of_this_page": "1–2 short sentences; each <= 14 words.",
+        "illustration": "No text. Include framing, action, expressions, and setting anchors.",
+        "characters_in_this_page": ["Character Name"]
+      }
+    }
+  ]
+}
+
+Now generate the completed JSON book following all rules above."""
+
+PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS_V3 = """Write a children's book. IMPORTANT!! ENSURE YOUR RESPONSE IS **LESS** THAN 1301 WORDS / 2201 TOTAL_TOKENS.:
+ - **Theme**: {theme}
+ - **Plot**:
+    - Interesting, adventurous, and fun!
+    - Relevant in some way to lives or imaginations of the intended audience
+- **Book Title**:
+  - Should capture the spirit of adventure, theme, and emotion in the story, without being too direct or generic.
+  - Aim for a unique, memorable, and evocative title that appeals to children’s imaginations.
+  - Avoid overly descriptive titles that summarize the story; instead, think of titles that spark curiosity and wonder about the character’s journey or adventure.
+ - **Reading level**: early toddlers.
+ - **Characters**:
+    - There should be between 1 and 5 characters in the book
+    - Characters should have distinct personalities and behaviors
+    - Character appearances should be distinct in size, coloring, clothing, facial and body features, and these attributes should distinguish them from one another
+    - Any character present in any `page` > `characters_in_this_page` *MUST* also be present *ONCE AND ONLY ONCE* in `characters`
+    - Names used in `page` > `characters_in_this_page` must *EXACTLY* match names present in `characters`
+ - **Settings**:
+    - Add top-level `settings` with at least one, preferably multiple setting changes.
+    - Each `settings` entry must include: `id`, `name`, and `visual_anchor_details`.
+    - Every page must include `setting_id` that matches one `settings.id`.
+    - Reuse `setting_id` when the setting has not changed.
+    - In each page `illustration`, describe setting details so generated illustrations remain visually coherent.
+ - **`book_length_n_pages`**
+    - Length may vary as needed, consistent with the reading level of the intended audience
+    - The parameter of 10 in the example output format below is an example only
+    - number of entries in `pages` should *EXACTLY* match `book_length_n_pages`
+    - ensure the number of pages *WILL NOT* result in a response greater than 1301 WORDS / 2201 TOTAL_TOKENS
+ - **`illustration_values`**:
+    - *DO NOT* include any dialogue or text to be depicted in the image. All dialogue should be in the `text_content_of_this_page` value for a given page.
+    - Will be used to generate images, so, to keep them coherent, make sure to mention the setting of the image, even if the setting is the same as in the previous page. The setting should be described in detail in `illustration` values.
+    - should include the description of characters' action, poses, movements, and/or facial expression where warranted. We don't want illustrations that are boring or overly static.
+ - **`characters`>`appearance`**:
+    - should be very descriptive
+    - These descriptions will be used to generate multiple images, so we need sufficient detail to generate consistent depictions of the characters.
+ - **Ensure output is valid JSON (i.e. no syntax errors, opening/closing braces match, escape double quotes in strings, etc.)**
+ - **Your response length**: *DO NOT EXCEED 1301 WORDS / 2201 TOTAL_TOKENS* Consider this length limit in determing all parameter values!!
+
+OUTPUT FORMAT:
+"""
+
+TEMPLATE_CHILDRENS_BOOK_V3 = """```{"book_title":"The title of the book","book_length_n_pages":10,"characters":[{"name":"<Name of character>","description":"Brief description of character personality, behavior, etc.","appearance":"Detailed physical description of character."},{"name":"<Name of character>","description":"Brief description of character personality, behavior, etc.","appearance":"Detailed physical description of character."}],"settings":[{"id":"S1","name":"<Setting name>","visual_anchor_details":"Lighting, key objects, colors, atmosphere for visual consistency."},{"id":"S2","name":"<Setting name>","visual_anchor_details":"Lighting, key objects, colors, atmosphere for visual consistency."}],"plot_synopsis":"Plot synopsis.","pages":[{"page_number":1,"setting_id":"S1","content":{"text_content_of_this_page":"Text content of page. Content should adhere to `plot_synopsis` and advance the plot appropriately.","illustration":"Illustration or graphic content of page","characters_in_this_page":["Character Name 1","Character Name 2"]}},{"page_number":2,"setting_id":"S1","content":{"text_content_of_this_page":"Text content of page. Content should adhere to `plot_synopsis` and advance the plot appropriately.","illustration":"Illustration or graphic content of page","characters_in_this_page":["Character Name 1","Character Name 2"]}},{"page_number":3,"setting_id":"S2","content":{"text_content_of_this_page":"Text content of page. Content should adhere to `plot_synopsis` and advance the plot appropriately.","illustration":"Illustration or graphic content of page","characters_in_this_page":["Character Name 1","Character Name 2"]}}]}```
+"""
+
 THEMES = [
     "Embracing individuality and self-expression",
     "The value of kindness in everyday life",

@@ -99,7 +99,13 @@ class GoogleImageGenerator:
         response = self._client.models.generate_content(
             model=self.model,
             contents=contents,
-            config=types.GenerateContentConfig(response_modalities=["IMAGE"]),
+            config=types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+                image_config=types.ImageConfig(
+                    aspect_ratio=settings.google_image_aspect_ratio,
+                    image_size=settings.google_image_size,
+                ),
+            ),
         )
         image_bytes = self._extract_image_bytes(response)
         if not image_bytes:

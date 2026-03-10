@@ -175,6 +175,47 @@ def test_make_illustration_prompt_empty_characters():
     assert prompt_json["characters_in_illustration"] == []
 
 
+@pytest.mark.parametrize("prompt_version", ["v2", "v3"])
+def test_make_illustration_prompt_v2_v3_injects_setting_anchor_values(
+    monkeypatch, prompt_version
+):
+    mock_page = create_mock_page(
+        illustration_style="fantasy",
+        illustration="A magical forest",
+        text_content="Once upon a time...",
+        characters=[
+            {
+                "name": "Elf",
+                "appearance": "Small and nimble",
+                "description": "A short elf with big ears wearing a green tunic and wearing golden shoes.",
+            }
+        ],
+    )
+    mock_page.setting_id = "S1"
+    mock_page.book_parent.settings = [
+        MagicMock(
+            id="S1",
+            name="Forest Clearing",
+            visual_anchor_details="Dappled sunlight, mossy stones, tall pines",
+        )
+    ]
+    monkeypatch.setattr(
+        "src.core.image_generation.settings.prompt_path_version",
+        prompt_version,
+    )
+
+    prompt = make_illustration_prompt(mock_page, include_style=False)
+    prompt_json = json.loads(prompt[len(pt.PROMPT_PAGE_ILLUSTRATION_PREFACE) :].strip())
+
+    assert "illustration_style" not in prompt_json
+    assert prompt_json["setting_name"] == "Forest Clearing"
+    assert (
+        prompt_json["setting_visual_anchor_details"]
+        == "Dappled sunlight, mossy stones, tall pines"
+    )
+    assert "setting_id" not in prompt_json
+
+
 @pytest.mark.asyncio
 @patch("src.services.openai_service.generate_image")
 async def test_generate_single_page_illustration(mock_generate_image):

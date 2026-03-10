@@ -1,6 +1,10 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from src.core.content_generation import generate_book
+from src.core.content_generation import (
+    generate_book,
+    build_story_prompt,
+    validate_book_for_prompt_path,
+)
 from src.api.models.book_models import Book
 
 
@@ -20,10 +24,23 @@ async def test_generate_book(mock_build_text_generator, mock_generate_page_illus
                 "appearance": "Tall with a big hat"
             }
         ],
+        "settings": [
+            {
+                "id": "S1",
+                "name": "Path Start",
+                "visual_anchor_details": "Morning light, pebble path, green bushes"
+            },
+            {
+                "id": "S2",
+                "name": "Treasure Cave",
+                "visual_anchor_details": "Warm glow, wooden chest, stone walls"
+            }
+        ],
         "plot_synopsis": "An exciting journey into the world of testing.",
         "pages": [
             {
                 "page_number": 1,
+                "setting_id": "S1",
                 "content": {
                     "text_content_of_this_page": "Testy begins his journey.",
                     "illustration": "Testy standing at the start of a path.",
@@ -32,6 +49,7 @@ async def test_generate_book(mock_build_text_generator, mock_generate_page_illus
             },
             {
                 "page_number": 2,
+                "setting_id": "S2",
                 "content": {
                     "text_content_of_this_page": "Testy finds a treasure.",
                     "illustration": "Testy holding a treasure chest.",
@@ -71,3 +89,46 @@ async def test_generate_book(mock_build_text_generator, mock_generate_page_illus
     # Ensure the text + image generation functions were called
     mock_generator.generate_book_response.assert_awaited_once()
     mock_generate_page_illustrations.assert_called_once()
+
+
+def test_build_story_prompt_selects_v2():
+    prompt = build_story_prompt("A rainy day adventure", "v2")
+    assert "Write a children's picture book in JSON." in prompt
+    assert '"settings"' in prompt
+    assert '"setting_id"' in prompt
+
+
+def test_build_story_prompt_selects_v3():
+    prompt = build_story_prompt("A rainy day adventure", "v3")
+    assert "Interesting, adventurous, and fun!" in prompt
+    assert '"settings"' in prompt
+    assert '"setting_id"' in prompt
+
+
+def test_validate_book_for_prompt_path_v2_requires_settings():
+    book = Book(
+        book_title="Test",
+        book_length_n_pages=1,
+        characters=[
+            {
+                "name": "A",
+                "description": "D",
+                "appearance": "P",
+            }
+        ],
+        plot_synopsis="Plot",
+        pages=[
+            {
+                "page_number": 1,
+                "content": {
+                    "text_content_of_this_page": "Text",
+                    "illustration": "Illustration",
+                    "characters_in_this_page": ["A"],
+                },
+            }
+        ],
+    )
+    with pytest.raises(ValueError):
+        validate_book_for_prompt_path(book, "v2")
+    with pytest.raises(ValueError):
+        validate_book_for_prompt_path(book, "v3")

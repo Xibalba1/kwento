@@ -1,12 +1,14 @@
 import copy
 import json
 import asyncio
+import hashlib
 import random
+import time
+from datetime import datetime, timezone
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
 from api.models.book_models import Page
-from api.models.helpers import remove_book_model_relationships
 from config import settings
 from core.progress_estimation import GenerationProgressEstimator
 from core.prompts import prompts as pt
@@ -21,7 +23,6 @@ from utils.general_utils import (
     construct_storage_path,
     ensure_directory_exists,
     get_logger,
-    write_json_file,
 )
 
 logger = get_logger(__name__)
@@ -31,8 +32,19 @@ class ImageGenerationPipelineError(RuntimeError):
     pass
 
 
-def make_illustration_prompt(page: Page, include_style: bool = True) -> str:
-    illustration_prompt = pt.PROMPT_PAGE_ILLUSTRATION_BODY.copy()
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def make_illustration_prompt(
+    page: Page, include_style: bool = True, prompt_path_version: Optional[str] = None
+) -> str:
+    selected_prompt_path_version = prompt_path_version or settings.prompt_path_version
+    illustration_prompt = copy.deepcopy(pt.PROMPT_PAGE_ILLUSTRATION_BODY)
     illustration_prompt["SYSTEM_NOTES"] = dict(
         pt.PROMPT_PAGE_ILLUSTRATION_BODY.get("SYSTEM_NOTES", {})
     )
@@ -48,6 +60,27 @@ def make_illustration_prompt(page: Page, include_style: bool = True) -> str:
         {"name": cinfo.name, "appearance": cinfo.appearance}
         for cinfo in page.content.characters_in_this_page_data
     ]
+    if (
+        selected_prompt_path_version in {"v2", "v3"}
+        and getattr(page, "setting_id", None)
+        and getattr(page, "book_parent", None)
+    ):
+        setting = next(
+            (
+                s
+                for s in getattr(page.book_parent, "settings", [])
+                if s.id == page.setting_id
+            ),
+            None,
+        )
+        if setting is None:
+            raise ValueError(
+                f"Unable to resolve setting for page_number={page.page_number} with setting_id={page.setting_id}"
+            )
+        illustration_prompt["setting_name"] = setting.name
+        illustration_prompt["setting_visual_anchor_details"] = (
+            setting.visual_anchor_details
+        )
     illustration_prompt["text_content"] = page.content.text_content_of_this_page
     illustration_prompt_str = json.dumps(illustration_prompt, indent=1)
     illustration_prompt_str = (
@@ -129,13 +162,12 @@ class IllustrationStrategy(ABC):
     async def _generate_and_save_page_once(
         self,
         page: Page,
+        illustration_prompt: str,
         images_dir: str,
-        include_style: bool,
         reference_images: Optional[list[bytes]],
         used_reference_seed: bool,
     ) -> tuple[Dict[str, Any], bytes]:
-        illustration_prompt = make_illustration_prompt(page, include_style=include_style)
-        page.content.illustration_prompt = illustration_prompt
+        started = time.monotonic()
         request = ImageGenerationRequest(
             prompt=illustration_prompt,
             reference_images=reference_images,
@@ -148,6 +180,7 @@ class IllustrationStrategy(ABC):
             image_service.save_image, response.image_bytes, relative_filepath
         )
         page.content.illustration = saved_path
+        duration_seconds = round(time.monotonic() - started, 3)
         return (
             {
                 "image_data": None,
@@ -155,6 +188,7 @@ class IllustrationStrategy(ABC):
                 "model": response.model,
                 "saved_path": saved_path,
                 "used_reference_seed": used_reference_seed,
+                "generation_duration_seconds": duration_seconds,
             },
             response.image_bytes,
         )
@@ -166,19 +200,67 @@ class IllustrationStrategy(ABC):
         include_style: bool,
         reference_images: Optional[list[bytes]],
         used_reference_seed: bool,
+        prompt_path_version: Optional[str] = None,
     ) -> tuple[Dict[str, Any], bytes]:
         attempts = max(1, int(settings.image_generation_retry_attempts))
+        illustration_prompt = make_illustration_prompt(
+            page,
+            include_style=include_style,
+            prompt_path_version=prompt_path_version,
+        )
+        page.content.illustration_prompt = illustration_prompt
+        attempt_records = []
+        overall_started = time.monotonic()
+
         for attempt in range(attempts):
+            attempt_started_at = _utcnow_iso()
+            attempt_monotonic_start = time.monotonic()
             try:
-                return await self._generate_and_save_page_once(
+                image_data, image_bytes = await self._generate_and_save_page_once(
                     page=page,
+                    illustration_prompt=illustration_prompt,
                     images_dir=images_dir,
-                    include_style=include_style,
                     reference_images=reference_images,
                     used_reference_seed=used_reference_seed,
                 )
+                attempt_records.append(
+                    {
+                        "attempt_number": attempt + 1,
+                        "status": "success",
+                        "started_at": attempt_started_at,
+                        "duration_seconds": round(
+                            time.monotonic() - attempt_monotonic_start, 3
+                        ),
+                    }
+                )
+                image_data.update(
+                    {
+                        "page_number": page.page_number,
+                        "attempt_count": attempt + 1,
+                        "attempts": attempt_records,
+                        "illustration_prompt": illustration_prompt,
+                        "illustration_prompt_char_count": len(illustration_prompt),
+                        "illustration_prompt_sha256": _sha256_text(illustration_prompt),
+                        "total_duration_seconds": round(
+                            time.monotonic() - overall_started, 3
+                        ),
+                    }
+                )
+                return image_data, image_bytes
             except Exception as exc:
                 page_index = max(0, page.page_number - 1)
+                attempt_records.append(
+                    {
+                        "attempt_number": attempt + 1,
+                        "status": "error",
+                        "started_at": attempt_started_at,
+                        "duration_seconds": round(
+                            time.monotonic() - attempt_monotonic_start, 3
+                        ),
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                    }
+                )
                 if attempt == attempts - 1:
                     raise ImageGenerationPipelineError(
                         f"Image generation failed at page_index={page_index}, "
@@ -207,6 +289,7 @@ class IllustrationStrategy(ABC):
         book,
         images_dir: str,
         progress: Optional[GenerationProgressEstimator] = None,
+        prompt_path_version: Optional[str] = None,
     ) -> Dict[int, Any]:
         ...
 
@@ -217,6 +300,7 @@ class LegacyIllustrationStrategy(IllustrationStrategy):
         book,
         images_dir: str,
         progress: Optional[GenerationProgressEstimator] = None,
+        prompt_path_version: Optional[str] = None,
     ) -> Dict[int, Any]:
         illustrations = {}
         total_pages = len(book.pages)
@@ -227,6 +311,7 @@ class LegacyIllustrationStrategy(IllustrationStrategy):
                 include_style=True,
                 reference_images=None,
                 used_reference_seed=False,
+                prompt_path_version=prompt_path_version,
             )
             illustrations[page.page_number] = image_data
             logger.info(f"Generated illustration for page {page.page_number}")
@@ -244,6 +329,7 @@ class SeededReferenceEditStrategy(IllustrationStrategy):
         book,
         images_dir: str,
         progress: Optional[GenerationProgressEstimator] = None,
+        prompt_path_version: Optional[str] = None,
     ) -> Dict[int, Any]:
         illustrations: Dict[int, Any] = {}
         total_pages = len(book.pages)
@@ -257,6 +343,7 @@ class SeededReferenceEditStrategy(IllustrationStrategy):
             include_style=True,
             reference_images=None,
             used_reference_seed=False,
+            prompt_path_version=prompt_path_version,
         )
         illustrations[seed_page.page_number] = seed_result
         logger.info(
@@ -284,6 +371,7 @@ class SeededReferenceEditStrategy(IllustrationStrategy):
                     include_style=False,
                     reference_images=[seed_image_bytes],
                     used_reference_seed=True,
+                    prompt_path_version=prompt_path_version,
                 )
                 logger.info(
                     "Generated illustration for page %s with seeded strategy.",
@@ -333,10 +421,13 @@ def get_illustration_strategy(
 
 
 async def generate_page_illustrations(
-    book, progress: GenerationProgressEstimator = None
+    book,
+    progress: GenerationProgressEstimator = None,
+    prompt_path_version: Optional[str] = None,
+    artifact_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, Any]:
     """
-    Generates illustrations for all pages in a book and saves them appropriately.
+    Generates and saves page illustrations for all pages in a book.
     """
     illustrations = {}
     logger.info(f"Generating illustrations for the book '{book.book_title}'")
@@ -355,20 +446,17 @@ async def generate_page_illustrations(
     logger.info(f"Directories ensured for book '{book.book_title}'")
 
     strategy = get_illustration_strategy()
-    illustrations = await strategy.generate(book, images_dir, progress=progress)
-
-    book_copy_no_refs = remove_book_model_relationships(copy.deepcopy(book))
-    book_data = book_copy_no_refs.dict()
-    metadata = {
-        "book_id": str(book.book_id),
-        "book_title": book.book_title,
-    }
-
-    filename = f"{book_id_str}.json"
-    write_json_file(filename, book_data, relative_path=book_dir, metadata=metadata)
-    logger.info(f"Saved book JSON for '{book.book_title}'")
-    if progress:
-        progress.set_stage("persisting_book_data")
-        progress.mark_work_completed(1.0, note="Book JSON persisted.")
+    illustrations = await strategy.generate(
+        book,
+        images_dir,
+        progress=progress,
+        prompt_path_version=prompt_path_version or settings.prompt_path_version,
+    )
+    if artifact_context is not None:
+        artifact_context["strategy"] = strategy.__class__.__name__
+        artifact_context["page_results"] = [
+            illustrations[pn] for pn in sorted(illustrations.keys())
+        ]
+        artifact_context["page_count"] = len(illustrations)
 
     return illustrations
