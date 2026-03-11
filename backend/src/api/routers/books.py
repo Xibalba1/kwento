@@ -10,7 +10,13 @@ from datetime import datetime, timedelta, timezone
 
 from utils.general_utils import get_logger
 from config import settings
-from api.models.book_models import Book, BookResponse, BookCreateRequest, ImageResponse
+from api.models.book_models import (
+    Book,
+    BookResponse,
+    BookCreateRequest,
+    CoverResponse,
+    ImageResponse,
+)
 from core import content_generation
 from utils.general_utils import (
     get_book_list,
@@ -78,6 +84,16 @@ async def create_book(book_request: BookCreateRequest):
             book_title=book.book_title,
             expires_at=expires_at,
             json_url=json_url,
+            cover=(
+                CoverResponse(
+                    url=book.cover["url"],
+                    expires_at=book.cover["expires_at"],
+                    provider=book.cover.get("provider"),
+                    model=book.cover.get("model"),
+                )
+                if isinstance(book.cover, dict)
+                else None
+            ),
             images=images_response,
         )
 

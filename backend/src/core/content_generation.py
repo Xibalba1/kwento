@@ -120,6 +120,19 @@ def _build_generation_run_artifact(
             "page_count": 0,
             "pages": [],
         },
+        "cover_generation": {
+            "duration_seconds": None,
+            "provider": None,
+            "model": None,
+            "saved_path": None,
+            "used_reference_seed": None,
+            "attempt_count": 0,
+            "attempts": [],
+            "cover_prompt": None,
+            "cover_prompt_char_count": 0,
+            "cover_prompt_sha256": None,
+            "signed_url_assigned": False,
+        },
         "timing": {"stages": {}},
         "cost_analytics": {
             "text_prompt_tokens": None,
@@ -199,6 +212,15 @@ def _extract_partial_image_page_data(book: Optional[Book]) -> list[Dict[str, Any
             }
         )
     return pages
+
+
+def _extract_partial_cover_data(book: Optional[Book]) -> Optional[Dict[str, Any]]:
+    if book is None or not isinstance(book.cover, dict):
+        return None
+    return {
+        "saved_path": book.cover.get("saved_path"),
+        "status": "partial",
+    }
 
 
 def build_story_prompt(theme: str, prompt_path_version: str) -> str:
@@ -338,14 +360,14 @@ async def generate_book(theme: str, request_id: Optional[str] = None) -> Book:
         style_attributes = random.choice(pt.ILLUSTRATION_STYLE_ATTRIBUTES)
         book.illustration_style = style_attributes
 
-        # One work unit per page illustration plus one for persisting book JSON.
+        # One work unit per page illustration, one for cover, and one for persisting book JSON.
         progress.set_stage("generating_illustrations")
-        progress.add_total_work(float(len(book.pages) + 1))
+        progress.add_total_work(float(len(book.pages) + 2))
 
         # Generate illustrations after creating the book
         image_artifact_context: Dict[str, Any] = {}
         stage_started = time.monotonic()
-        illustrations = await generate_illustrations(
+        illustrations, cover_data = await generate_illustrations(
             book,
             progress,
             prompt_path_version=prompt_path_version,
@@ -364,6 +386,21 @@ async def generate_book(theme: str, request_id: Optional[str] = None) -> Book:
         generation_artifact["image_generation"]["pages"] = image_artifact_context.get(
             "page_results", []
         )
+        cover_result = image_artifact_context.get("cover_result") or cover_data or {}
+        generation_artifact["cover_generation"] = {
+            **generation_artifact["cover_generation"],
+            "duration_seconds": cover_result.get("total_duration_seconds"),
+            "provider": cover_result.get("provider"),
+            "model": cover_result.get("model"),
+            "saved_path": cover_result.get("saved_path"),
+            "used_reference_seed": cover_result.get("used_reference_seed"),
+            "attempt_count": cover_result.get("attempt_count", 0),
+            "attempts": cover_result.get("attempts", []),
+            "cover_prompt": cover_result.get("cover_prompt"),
+            "cover_prompt_char_count": cover_result.get("cover_prompt_char_count", 0),
+            "cover_prompt_sha256": cover_result.get("cover_prompt_sha256"),
+            "signed_url_assigned": False,
+        }
 
         expiration_time = timedelta(hours=1)
         expires_at = datetime.now(timezone.utc) + expiration_time
@@ -387,6 +424,21 @@ async def generate_book(theme: str, request_id: Optional[str] = None) -> Book:
                     "url": url,
                     "expires_at": expires_at,
                 }
+
+        if settings.use_cloud_storage:
+            cover_url = generate_presigned_url(f"{book.book_id}/cover.png", expiration=3600)
+        else:
+            cover_url = str(
+                (Path(settings.local_data_path) / f"{book.book_id}/cover.png").resolve()
+            )
+        book.cover = {
+            "url": cover_url,
+            "expires_at": expires_at,
+            "provider": cover_result.get("provider"),
+            "model": cover_result.get("model"),
+            "saved_path": cover_result.get("saved_path"),
+        }
+        generation_artifact["cover_generation"]["signed_url_assigned"] = True
 
         progress.set_stage("persisting_book_data")
         stage_started = time.monotonic()
@@ -419,10 +471,10 @@ async def generate_book(theme: str, request_id: Optional[str] = None) -> Book:
         generation_artifact["cost_analytics"]["text_total_tokens"] = usage.get(
             "total_tokens"
         )
-        generation_artifact["cost_analytics"]["image_count_requested"] = len(book.pages)
+        generation_artifact["cost_analytics"]["image_count_requested"] = len(book.pages) + 1
         generation_artifact["cost_analytics"]["image_count_generated"] = len(
             generation_artifact["image_generation"]["pages"]
-        )
+        ) + (1 if generation_artifact["cover_generation"]["saved_path"] else 0)
 
         success = True
         return book
@@ -453,6 +505,12 @@ async def generate_book(theme: str, request_id: Optional[str] = None) -> Book:
                 partial_pages = _extract_partial_image_page_data(book)
                 generation_artifact["image_generation"]["pages"] = partial_pages
                 generation_artifact["image_generation"]["page_count"] = len(partial_pages)
+            partial_cover = _extract_partial_cover_data(book)
+            if partial_cover and not generation_artifact["cover_generation"]["saved_path"]:
+                generation_artifact["cover_generation"] = {
+                    **generation_artifact["cover_generation"],
+                    **partial_cover,
+                }
         try:
             persist_started = time.monotonic()
             _persist_generation_artifact(
@@ -476,15 +534,15 @@ async def generate_illustrations(
     progress: GenerationProgressEstimator,
     prompt_path_version: str,
     artifact_context: Optional[Dict[str, Any]] = None,
-) -> Dict[int, Any]:
+) -> tuple[Dict[int, Any], Dict[str, Any]]:
 
-    illustrations = await generate_page_illustrations(
+    illustrations, cover_result = await generate_page_illustrations(
         book,
         progress,
         prompt_path_version=prompt_path_version,
         artifact_context=artifact_context,
     )
-    return illustrations
+    return illustrations, cover_result
 
 
 if __name__ == "__main__":
