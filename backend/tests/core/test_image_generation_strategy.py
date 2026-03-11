@@ -23,13 +23,11 @@ class FakeImageGenerator:
 
     def __init__(self):
         self.requests = []
-        self.responses = [b"seed-bytes", b"page-2-bytes", b"page-3-bytes"]
 
     async def generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
         self.requests.append(request)
-        image_bytes = self.responses[len(self.requests) - 1]
         return ImageGenerationResponse(
-            image_bytes=image_bytes,
+            image_bytes=b"image-bytes",
             provider=self.provider,
             model=self.model,
         )
@@ -71,6 +69,10 @@ def _make_book():
     return SimpleNamespace(
         book_id=uuid.uuid4(),
         book_title="Test Book",
+        plot_synopsis="A short synopsis",
+        settings=[],
+        characters=[],
+        illustration_style={"style": "storybook"},
         pages=[
             _make_page(1, "Scene 1"),
             _make_page(2, "Scene 2"),
@@ -116,16 +118,17 @@ async def test_seeded_strategy_uses_seed_reference_for_subsequent_pages(monkeypa
         lambda image_data, relative_filepath: f"saved://{relative_filepath}",
     )
 
-    await strategy.generate(book, images_dir="book/images")
+    _, cover_result = await strategy.generate(book, book_dir="book", images_dir="book/images")
 
-    assert len(fake_generator.requests) == 3
+    assert len(fake_generator.requests) == 4
     assert fake_generator.requests[0].reference_images is None
     for request in fake_generator.requests[1:]:
-        assert request.reference_images == [b"seed-bytes"]
+        assert request.reference_images == [b"image-bytes"]
 
-    prompt_one = fake_generator.requests[0].prompt
-    prompt_two = fake_generator.requests[1].prompt
-    prompt_three = fake_generator.requests[2].prompt
+    page_requests = [r for r in fake_generator.requests if r.page_index is not None]
+    prompt_one = page_requests[0].prompt
+    prompt_two = page_requests[1].prompt
+    prompt_three = page_requests[2].prompt
 
     body_one = json.loads(prompt_one[len(pt.PROMPT_PAGE_ILLUSTRATION_PREFACE) :].strip())
     body_two = json.loads(prompt_two[len(pt.PROMPT_PAGE_ILLUSTRATION_PREFACE) :].strip())
@@ -143,6 +146,7 @@ async def test_seeded_strategy_uses_seed_reference_for_subsequent_pages(monkeypa
         body_three["SYSTEM_NOTES"]["4"]
         == pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE
     )
+    assert cover_result["saved_path"] == "saved://book/cover.png"
 
 
 def test_seeded_strategy_worker_count():
@@ -186,8 +190,8 @@ async def test_seeded_strategy_retries_transient_errors(monkeypatch):
         False,
     )
 
-    await strategy.generate(book, images_dir="book/images")
-    assert generator.calls >= 4  # 1 failed + 3 successful page generations
+    await strategy.generate(book, book_dir="book", images_dir="book/images")
+    assert generator.calls >= 5  # at least one retry plus seed+cover+2 pages
 
 
 @pytest.mark.asyncio
@@ -223,4 +227,4 @@ async def test_seeded_strategy_fails_whole_book_after_retries(monkeypatch):
     )
 
     with pytest.raises(image_generation.ImageGenerationPipelineError):
-        await strategy.generate(book, images_dir="book/images")
+        await strategy.generate(book, book_dir="book", images_dir="book/images")

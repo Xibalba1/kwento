@@ -10,14 +10,25 @@ async def test_create_book(mock_generate_book):
     # Mock generate_book
     mock_book = MagicMock()
     mock_book.book_title = "The Adventures of Testy McTestface"
+    mock_book.book_id = "test-book-id"
+    mock_book.cover = {
+        "url": "http://example.com/cover.png",
+        "expires_at": "2026-01-01T00:00:00Z",
+    }
     mock_book.pages = [MagicMock(), MagicMock()]
     mock_book.pages[0].page_number = 1
     mock_book.pages[0].content.text_content_of_this_page = "Testy begins his journey."
-    mock_book.pages[0].content.illustration = "http://example.com/image1.png"
+    mock_book.pages[0].content.illustration = {
+        "url": "http://example.com/image1.png",
+        "expires_at": "2026-01-01T00:00:00Z",
+    }
     mock_book.pages[0].content.characters_in_this_page = ["Testy McTestface"]
     mock_book.pages[1].page_number = 2
     mock_book.pages[1].content.text_content_of_this_page = "Testy finds a treasure."
-    mock_book.pages[1].content.illustration = "http://example.com/image2.png"
+    mock_book.pages[1].content.illustration = {
+        "url": "http://example.com/image2.png",
+        "expires_at": "2026-01-01T00:00:00Z",
+    }
     mock_book.pages[1].content.characters_in_this_page = ["Testy McTestface"]
     mock_generate_book.return_value = mock_book
 
@@ -27,11 +38,13 @@ async def test_create_book(mock_generate_book):
     # Assertions
     assert response.status_code == 200
     data = response.json()
-    assert data["title"] == "The Adventures of Testy McTestface"
-    assert len(data["pages"]) == 2
-    assert data["pages"][0]["page_number"] == 1
-    assert data["pages"][0]["text_content"] == "Testy begins his journey."
-    assert data["pages"][0]["illustration_url"] == "http://example.com/image1.png"
+    assert data["book_title"] == "The Adventures of Testy McTestface"
+    assert len(data["images"]) == 2
+    assert data["images"][0]["page"] == 1
+    assert data["images"][0]["url"] == "http://example.com/image1.png"
+    assert data["cover"]["url"] == "http://example.com/cover.png"
 
     # Ensure that generate_book was called
-    mock_generate_book.assert_called_once_with("Testing Adventures")
+    args, kwargs = mock_generate_book.call_args
+    assert args[0] == "Testing Adventures"
+    assert "request_id" in kwargs

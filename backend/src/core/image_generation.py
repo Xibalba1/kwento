@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
-from api.models.book_models import Page
+from api.models.book_models import Book, Page
 from config import settings
 from core.progress_estimation import GenerationProgressEstimator
 from core.prompts import prompts as pt
@@ -87,6 +87,40 @@ def make_illustration_prompt(
         f"{pt.PROMPT_PAGE_ILLUSTRATION_PREFACE}\n{illustration_prompt_str}"
     )
     return illustration_prompt_str
+
+
+def make_cover_prompt(book: Book, prompt_path_version: Optional[str] = None) -> str:
+    selected_prompt_path_version = prompt_path_version or settings.prompt_path_version
+    cover_prompt = copy.deepcopy(pt.PROMPT_PAGE_ILLUSTRATION_BODY)
+    cover_prompt["SYSTEM_NOTES"] = dict(pt.PROMPT_PAGE_ILLUSTRATION_BODY.get("SYSTEM_NOTES", {}))
+    cover_prompt["SYSTEM_NOTES"]["4"] = (
+        "This is a book cover illustration. Compose a dynamic, title-forward scene without any rendered text."
+    )
+    cover_prompt["SYSTEM_NOTES"]["5"] = (
+        "No letters, words, numbers, logos, captions, or speech bubbles in the final image."
+    )
+    cover_prompt["SYSTEM_NOTES"]["6"] = (
+        pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE
+    )
+    cover_prompt["illustration_style"] = book.illustration_style
+    cover_prompt["illustration_description"] = (
+        "Create a visually striking, toddler-friendly cover image that captures the heart of the story. "
+        f"Story title context: {book.book_title}. "
+        "Show characters in clear action with expressive faces, strong foreground subject focus, and a cohesive scene."
+    )
+    cover_prompt["characters_in_illustration"] = [
+        {"name": c.name, "appearance": c.appearance} for c in book.characters
+    ]
+    if selected_prompt_path_version in {"v2", "v3"} and getattr(book, "settings", None):
+        cover_prompt["settings_visual_anchor_details"] = [
+            {"setting_name": s.name, "visual_anchor_details": s.visual_anchor_details}
+            for s in book.settings
+        ]
+    cover_prompt["text_content"] = (
+        f"Book title: {book.book_title}. Plot synopsis: {book.plot_synopsis}"
+    )
+    cover_prompt_str = json.dumps(cover_prompt, indent=1)
+    return f"{pt.PROMPT_PAGE_ILLUSTRATION_PREFACE}\n{cover_prompt_str}"
 
 
 async def generate_single_page_illustration(
@@ -283,14 +317,126 @@ class IllustrationStrategy(ABC):
                 if delay > 0:
                     await asyncio.sleep(delay)
 
+    async def _generate_cover_once(
+        self,
+        book: Book,
+        cover_prompt: str,
+        cover_relative_filepath: str,
+        reference_images: Optional[list[bytes]],
+        used_reference_seed: bool,
+    ) -> tuple[Dict[str, Any], bytes]:
+        started = time.monotonic()
+        request = ImageGenerationRequest(
+            prompt=cover_prompt,
+            reference_images=reference_images,
+            page_index=None,
+        )
+        response = await self.image_generator.generate(request)
+        saved_path = await asyncio.to_thread(
+            image_service.save_image, response.image_bytes, cover_relative_filepath
+        )
+        duration_seconds = round(time.monotonic() - started, 3)
+        return (
+            {
+                "provider": response.provider,
+                "model": response.model,
+                "saved_path": saved_path,
+                "used_reference_seed": used_reference_seed,
+                "generation_duration_seconds": duration_seconds,
+            },
+            response.image_bytes,
+        )
+
+    async def _generate_cover_with_retry(
+        self,
+        book: Book,
+        book_dir: str,
+        reference_images: Optional[list[bytes]],
+        used_reference_seed: bool,
+        prompt_path_version: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        attempts = max(1, int(settings.image_generation_retry_attempts))
+        cover_prompt = make_cover_prompt(book, prompt_path_version=prompt_path_version)
+        attempt_records = []
+        overall_started = time.monotonic()
+        cover_relative_filepath = f"{book_dir}/cover.png"
+
+        for attempt in range(attempts):
+            attempt_started_at = _utcnow_iso()
+            attempt_monotonic_start = time.monotonic()
+            try:
+                cover_data, _ = await self._generate_cover_once(
+                    book=book,
+                    cover_prompt=cover_prompt,
+                    cover_relative_filepath=cover_relative_filepath,
+                    reference_images=reference_images,
+                    used_reference_seed=used_reference_seed,
+                )
+                attempt_records.append(
+                    {
+                        "attempt_number": attempt + 1,
+                        "status": "success",
+                        "started_at": attempt_started_at,
+                        "duration_seconds": round(
+                            time.monotonic() - attempt_monotonic_start, 3
+                        ),
+                    }
+                )
+                cover_data.update(
+                    {
+                        "attempt_count": attempt + 1,
+                        "attempts": attempt_records,
+                        "cover_prompt": cover_prompt,
+                        "cover_prompt_char_count": len(cover_prompt),
+                        "cover_prompt_sha256": _sha256_text(cover_prompt),
+                        "total_duration_seconds": round(
+                            time.monotonic() - overall_started, 3
+                        ),
+                    }
+                )
+                return cover_data
+            except Exception as exc:
+                attempt_records.append(
+                    {
+                        "attempt_number": attempt + 1,
+                        "status": "error",
+                        "started_at": attempt_started_at,
+                        "duration_seconds": round(
+                            time.monotonic() - attempt_monotonic_start, 3
+                        ),
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                    }
+                )
+                if attempt == attempts - 1:
+                    raise ImageGenerationPipelineError(
+                        f"Cover image generation failed for book_id={book.book_id}, "
+                        f"provider={self.image_generator.provider}, "
+                        f"model={self.image_generator.model} after {attempts} attempts: {exc}"
+                    ) from exc
+                delay = self._retry_delay_seconds(attempt)
+                logger.warning(
+                    "Retrying cover generation for book_id=%s provider=%s model=%s "
+                    "attempt=%s/%s delay=%.2fs",
+                    book.book_id,
+                    self.image_generator.provider,
+                    self.image_generator.model,
+                    attempt + 2,
+                    attempts,
+                    delay,
+                )
+                if delay > 0:
+                    await asyncio.sleep(delay)
+
     @abstractmethod
     async def generate(
         self,
         book,
+        book_dir: str,
         images_dir: str,
         progress: Optional[GenerationProgressEstimator] = None,
         prompt_path_version: Optional[str] = None,
-    ) -> Dict[int, Any]:
+    ) -> tuple[Dict[int, Any], Dict[str, Any]]:
         ...
 
 
@@ -298,14 +444,16 @@ class LegacyIllustrationStrategy(IllustrationStrategy):
     async def generate(
         self,
         book,
+        book_dir: str,
         images_dir: str,
         progress: Optional[GenerationProgressEstimator] = None,
         prompt_path_version: Optional[str] = None,
-    ) -> Dict[int, Any]:
+    ) -> tuple[Dict[int, Any], Dict[str, Any]]:
         illustrations = {}
+        seed_image_bytes: Optional[bytes] = None
         total_pages = len(book.pages)
         for idx, page in enumerate(book.pages, start=1):
-            image_data, _ = await self._generate_and_save_page_with_retry(
+            image_data, page_image_bytes = await self._generate_and_save_page_with_retry(
                 page=page,
                 images_dir=images_dir,
                 include_style=True,
@@ -313,6 +461,8 @@ class LegacyIllustrationStrategy(IllustrationStrategy):
                 used_reference_seed=False,
                 prompt_path_version=prompt_path_version,
             )
+            if idx == 1:
+                seed_image_bytes = page_image_bytes
             illustrations[page.page_number] = image_data
             logger.info(f"Generated illustration for page {page.page_number}")
             if progress:
@@ -320,21 +470,33 @@ class LegacyIllustrationStrategy(IllustrationStrategy):
                     1.0,
                     note=f"Illustration generated for page {idx}/{total_pages}.",
                 )
-        return illustrations
+        cover_result = await self._generate_cover_with_retry(
+            book=book,
+            book_dir=book_dir,
+            reference_images=[seed_image_bytes] if seed_image_bytes else None,
+            used_reference_seed=seed_image_bytes is not None,
+            prompt_path_version=prompt_path_version,
+        )
+        if progress:
+            progress.mark_work_completed(1.0, note="Cover generated.")
+        return illustrations, cover_result
 
 
 class SeededReferenceEditStrategy(IllustrationStrategy):
     async def generate(
         self,
         book,
+        book_dir: str,
         images_dir: str,
         progress: Optional[GenerationProgressEstimator] = None,
         prompt_path_version: Optional[str] = None,
-    ) -> Dict[int, Any]:
+    ) -> tuple[Dict[int, Any], Dict[str, Any]]:
         illustrations: Dict[int, Any] = {}
         total_pages = len(book.pages)
         if total_pages == 0:
-            return illustrations
+            raise ImageGenerationPipelineError(
+                "Cannot generate a cover without any pages to establish visual style."
+            )
 
         seed_page = book.pages[0]
         seed_result, seed_image_bytes = await self._generate_and_save_page_with_retry(
@@ -357,9 +519,7 @@ class SeededReferenceEditStrategy(IllustrationStrategy):
             )
 
         remaining_pages = book.pages[1:]
-        worker_count = self._determine_parallel_workers(len(remaining_pages))
-        if not remaining_pages:
-            return dict(sorted(illustrations.items()))
+        worker_count = self._determine_parallel_workers(len(remaining_pages) + 1)
 
         semaphore = asyncio.Semaphore(worker_count)
 
@@ -384,23 +544,41 @@ class SeededReferenceEditStrategy(IllustrationStrategy):
                     )
                 return page.page_number, image_data
 
+        async def _generate_cover():
+            async with semaphore:
+                cover_data = await self._generate_cover_with_retry(
+                    book=book,
+                    book_dir=book_dir,
+                    reference_images=[seed_image_bytes],
+                    used_reference_seed=True,
+                    prompt_path_version=prompt_path_version,
+                )
+                if progress:
+                    progress.mark_work_completed(1.0, note="Cover generated.")
+                return cover_data
+
         tasks = [
             asyncio.create_task(_generate_non_seed(page, idx))
             for idx, page in enumerate(remaining_pages, start=2)
         ]
+        cover_task = asyncio.create_task(_generate_cover())
         try:
-            results = await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks, cover_task)
         except Exception:
             for task in tasks:
                 if not task.done():
                     task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            if not cover_task.done():
+                cover_task.cancel()
+            await asyncio.gather(*tasks, cover_task, return_exceptions=True)
             raise
 
-        for page_number, image_data in results:
+        cover_result = results[-1]
+        page_results = results[:-1]
+        for page_number, image_data in page_results:
             illustrations[page_number] = image_data
 
-        return dict(sorted(illustrations.items()))
+        return dict(sorted(illustrations.items())), cover_result
 
 
 def get_illustration_strategy(
@@ -425,7 +603,7 @@ async def generate_page_illustrations(
     progress: GenerationProgressEstimator = None,
     prompt_path_version: Optional[str] = None,
     artifact_context: Optional[Dict[str, Any]] = None,
-) -> Dict[int, Any]:
+) -> tuple[Dict[int, Any], Dict[str, Any]]:
     """
     Generates and saves page illustrations for all pages in a book.
     """
@@ -446,8 +624,9 @@ async def generate_page_illustrations(
     logger.info(f"Directories ensured for book '{book.book_title}'")
 
     strategy = get_illustration_strategy()
-    illustrations = await strategy.generate(
+    illustrations, cover_result = await strategy.generate(
         book,
+        book_dir,
         images_dir,
         progress=progress,
         prompt_path_version=prompt_path_version or settings.prompt_path_version,
@@ -458,5 +637,6 @@ async def generate_page_illustrations(
             illustrations[pn] for pn in sorted(illustrations.keys())
         ]
         artifact_context["page_count"] = len(illustrations)
+        artifact_context["cover_result"] = cover_result
 
-    return illustrations
+    return illustrations, cover_result

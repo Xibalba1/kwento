@@ -127,6 +127,7 @@ class Book(BaseModel):
     settings: List[Setting] = Field(default_factory=list)
     plot_synopsis: str
     pages: List[Page] = Field(default_factory=list)
+    cover: Optional[Dict[str, Any]] = None
     illustration_style: Optional[Dict[str, Any]] = None
 
     class Config:
@@ -185,11 +186,19 @@ class ImageResponse(BaseModel):
     expires_at: datetime
 
 
+class CoverResponse(BaseModel):
+    url: str
+    expires_at: datetime
+    provider: Optional[str] = None
+    model: Optional[str] = None
+
+
 class BookResponse(BaseModel):
     book_id: str
     book_title: str
     expires_at: datetime  # Expiration timestamp for the JSON URL
     json_url: str  # Pre-signed URL for the book's JSON metadata
+    cover: Optional[CoverResponse] = None
     images: List[
         ImageResponse
     ]  # List of images with their URLs and expiration metadata

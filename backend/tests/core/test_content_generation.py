@@ -64,10 +64,17 @@ async def test_generate_book(mock_build_text_generator, mock_generate_page_illus
     mock_build_text_generator.return_value = mock_generator
 
     # Mock generate_page_illustrations
-    mock_generate_page_illustrations.return_value = {
-        1: {"url": "http://example.com/image1.png"},
-        2: {"url": "http://example.com/image2.png"},
-    }
+    mock_generate_page_illustrations.return_value = (
+        {
+            1: {"saved_path": "book/images/1.png"},
+            2: {"saved_path": "book/images/2.png"},
+        },
+        {
+            "saved_path": "book/cover.png",
+            "provider": "openai",
+            "model": "gpt-image-1.5",
+        },
+    )
 
     # Call the function
     theme = "Testing Adventures"
@@ -81,10 +88,11 @@ async def test_generate_book(mock_build_text_generator, mock_generate_page_illus
     assert (
         book.pages[0].content.text_content_of_this_page == "Testy begins his journey."
     )
-    assert book.pages[0].content.illustration == "http://example.com/image1.png"
+    assert isinstance(book.pages[0].content.illustration, dict)
     assert book.pages[1].page_number == 2
     assert book.pages[1].content.text_content_of_this_page == "Testy finds a treasure."
-    assert book.pages[1].content.illustration == "http://example.com/image2.png"
+    assert isinstance(book.pages[1].content.illustration, dict)
+    assert isinstance(book.cover, dict)
 
     # Ensure the text + image generation functions were called
     mock_generator.generate_book_response.assert_awaited_once()

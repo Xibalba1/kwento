@@ -445,6 +445,8 @@ def get_book_list() -> List[Dict[str, Any]]:
                                 "book_title": book_title,
                                 "json_url": json_url,
                                 "expires_at": expires_at,
+                                "cover_url": None,
+                                "cover_expires_at": None,
                                 "images": [],
                             }
                         else:
@@ -458,7 +460,23 @@ def get_book_list() -> List[Dict[str, Any]]:
                 elif blob_name.endswith(".png"):
                     # Assuming images are stored under {book_id}/images/{page}.png
                     parts = blob_name.split("/")
-                    if len(parts) >= 3 and parts[1] == "images":
+                    if len(parts) == 2 and parts[1] == "cover.png":
+                        book_id = parts[0]
+                        cover_url = generate_presigned_url(blob_name, expiration=3600)
+                        if book_id not in books_dict:
+                            books_dict[book_id] = {
+                                "book_id": book_id,
+                                "book_title": "",
+                                "json_url": "",
+                                "expires_at": expires_at,
+                                "cover_url": cover_url,
+                                "cover_expires_at": expires_at,
+                                "images": [],
+                            }
+                        else:
+                            books_dict[book_id]["cover_url"] = cover_url
+                            books_dict[book_id]["cover_expires_at"] = expires_at
+                    elif len(parts) >= 3 and parts[1] == "images":
                         book_id = parts[0]
                         page_str = parts[2].replace(".png", "")
                         try:
@@ -479,6 +497,8 @@ def get_book_list() -> List[Dict[str, Any]]:
                                 "book_title": "",  # Will be updated when JSON is processed
                                 "json_url": "",  # Will be updated when JSON is processed
                                 "expires_at": expires_at,
+                                "cover_url": None,
+                                "cover_expires_at": None,
                                 "images": [],
                             }
 
@@ -549,6 +569,14 @@ def get_book_list() -> List[Dict[str, Any]]:
                         "book_title": book_data["book_title"],
                         "json_url": str(book_json_path.resolve()),
                         "expires_at": datetime.now(timezone.utc) + expiration_time,
+                        "cover_url": (
+                            str((book_dir / "cover.png").resolve())
+                            if (book_dir / "cover.png").exists()
+                            else None
+                        ),
+                        "cover_expires_at": (
+                            expires_at if (book_dir / "cover.png").exists() else None
+                        ),
                         "images": [
                             {
                                 "page": page_data["page_number"],
@@ -626,6 +654,14 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
                 }
                 for image_blob in image_blobs
             ]
+            cover_blob_name = f"{book_id}/cover.png"
+            cover_blob = bucket.blob(cover_blob_name)
+            cover = None
+            if cover_blob.exists():
+                cover = {
+                    "url": generate_presigned_url(cover_blob_name, expiration=3600),
+                    "expires_at": expires_at,
+                }
 
             # Construct and return the book's metadata and URLs
             return {
@@ -633,6 +669,7 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
                 "book_title": book_title,
                 "json_url": json_url,
                 "expires_at": expires_at,
+                "cover": cover,
                 "images": images,
             }
         else:
@@ -673,12 +710,20 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
                 if isinstance(page_data, dict)
                 and isinstance(page_data.get("page_number"), int)
             ]
+            cover_path = book_dir / "cover.png"
+            cover = None
+            if cover_path.exists():
+                cover = {
+                    "url": str(cover_path.resolve()),
+                    "expires_at": expires_at,
+                }
 
             return {
                 "book_id": book_id,
                 "book_title": book_title,
                 "json_url": str(book_json_path.resolve()),  # Local path
                 "expires_at": expires_at,
+                "cover": cover,
                 "images": images,
             }
 
