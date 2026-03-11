@@ -47,7 +47,10 @@ def _is_dalle2_model(model_name: str) -> bool:
     return (model_name or "").strip().lower() == "dall-e-2"
 
 
-def _resolve_openai_image_size(model_name: str) -> str:
+def _resolve_openai_image_size(model_name: str, image_kind: str = "page") -> str:
+    if image_kind == "cover":
+        return "1024x1024"
+
     override = settings.openai_image_size_override
     if override:
         return override
@@ -111,8 +114,10 @@ def _validate_openai_image_params(model_name: str, size: str, quality: str) -> N
         )
 
 
-def _build_openai_image_request_kwargs(prompt: str, model_name: str) -> Dict[str, Any]:
-    size = _resolve_openai_image_size(model_name)
+def _build_openai_image_request_kwargs(
+    prompt: str, model_name: str, image_kind: str = "page"
+) -> Dict[str, Any]:
+    size = _resolve_openai_image_size(model_name, image_kind=image_kind)
     quality = _resolve_openai_image_quality(model_name)
     _validate_openai_image_params(model_name, size, quality)
 
@@ -161,6 +166,7 @@ def _build_openai_image_request_kwargs(prompt: str, model_name: str) -> Dict[str
         "OpenAI image request params | openai_image_request=%s",
         {
             "model": model_name,
+            "image_kind": image_kind,
             "size": size,
             "quality": quality,
             "response_mode": response_mode,
@@ -234,7 +240,7 @@ async def get_book_response_with_metadata(
 
 
 async def generate_image(
-    prompt: str, model: Optional[str] = None
+    prompt: str, model: Optional[str] = None, image_kind: str = "page"
 ) -> Optional[Dict[str, Any]]:
     """
     Generates an image based on a given prompt using OpenAI's Image API with retry logic.
@@ -253,7 +259,9 @@ async def generate_image(
     retry_delay_secs = 5
     selected_model = model or settings.openai_image_model
     request_kwargs = _build_openai_image_request_kwargs(
-        prompt=prompt, model_name=selected_model
+        prompt=prompt,
+        model_name=selected_model,
+        image_kind=image_kind,
     )
     for attempt in range(max_retries):
         try:

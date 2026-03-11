@@ -21,6 +21,7 @@ class ImageGenerationRequest:
     prompt: str
     reference_images: Optional[List[bytes]] = None
     page_index: Optional[int] = None
+    image_kind: str = "page"
 
 
 @dataclass
@@ -48,7 +49,9 @@ class OpenAIImageGenerator:
     async def generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
         # The existing OpenAI image path is text-to-image only.
         response = await openai_service.generate_image(
-            request.prompt, model=self.model
+            request.prompt,
+            model=self.model,
+            image_kind=request.image_kind,
         )
         image_b64 = response.data[0].b64_json
         image_bytes = base64.b64decode(image_b64)
@@ -102,7 +105,11 @@ class GoogleImageGenerator:
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE"],
                 image_config=types.ImageConfig(
-                    aspect_ratio=settings.google_image_aspect_ratio,
+                    aspect_ratio=(
+                        "1:1"
+                        if request.image_kind == "cover"
+                        else settings.google_image_aspect_ratio
+                    ),
                     image_size=settings.google_image_size,
                 ),
             ),

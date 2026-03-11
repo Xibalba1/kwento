@@ -29,13 +29,34 @@ async def test_openai_image_generator_is_mockable(mock_generate_image):
 
 
 @pytest.mark.asyncio
+@patch("src.services.image_generation_provider.openai_service.generate_image", new_callable=AsyncMock)
+async def test_openai_image_generator_passes_cover_kind(mock_generate_image):
+    raw_bytes = b"fake-image-bytes"
+    mock_generate_image.return_value = SimpleNamespace(
+        data=[SimpleNamespace(b64_json=base64.b64encode(raw_bytes).decode("utf-8"))]
+    )
+    generator = OpenAIImageGenerator(model="gpt-image-1.5")
+
+    await generator.generate(
+        ImageGenerationRequest(prompt="draw cover", image_kind="cover")
+    )
+
+    _, kwargs = mock_generate_image.await_args
+    assert kwargs["image_kind"] == "cover"
+
+
+@pytest.mark.asyncio
 async def test_google_image_generator_is_mockable_without_network():
     fake_part = SimpleNamespace(inline_data=SimpleNamespace(data=b"google-image-bytes"))
     fake_response = SimpleNamespace(parts=[fake_part])
+    captured = {"aspect_ratio": None}
+
+    def _generate_content(model, contents, config):
+        captured["aspect_ratio"] = config.image_config.aspect_ratio
+        return fake_response
+
     fake_client = SimpleNamespace(
-        models=SimpleNamespace(
-            generate_content=lambda model, contents, config: fake_response
-        )
+        models=SimpleNamespace(generate_content=_generate_content)
     )
 
     seed_img = Image.new("RGB", (1, 1), color="white")
@@ -51,3 +72,28 @@ async def test_google_image_generator_is_mockable_without_network():
     )
 
     assert response.image_bytes == b"google-image-bytes"
+    assert captured["aspect_ratio"] != "1:1"
+
+
+@pytest.mark.asyncio
+async def test_google_image_generator_uses_square_aspect_for_cover():
+    fake_part = SimpleNamespace(inline_data=SimpleNamespace(data=b"google-image-bytes"))
+    fake_response = SimpleNamespace(parts=[fake_part])
+    captured = {"aspect_ratio": None}
+
+    def _generate_content(model, contents, config):
+        captured["aspect_ratio"] = config.image_config.aspect_ratio
+        return fake_response
+
+    fake_client = SimpleNamespace(
+        models=SimpleNamespace(generate_content=_generate_content)
+    )
+
+    with patch.object(GoogleImageGenerator, "_build_client", return_value=fake_client):
+        generator = GoogleImageGenerator(model="gemini-image")
+
+    await generator.generate(
+        ImageGenerationRequest(prompt="draw a cover", image_kind="cover")
+    )
+
+    assert captured["aspect_ratio"] == "1:1"

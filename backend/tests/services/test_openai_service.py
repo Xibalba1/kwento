@@ -174,6 +174,19 @@ def test_openai_image_request_builder_respects_size_override(monkeypatch):
     assert kwargs["size"] == "1024x1024"
 
 
+def test_openai_image_request_builder_forces_square_for_cover(monkeypatch):
+    monkeypatch.setattr(
+        "src.services.openai_service.settings.openai_image_size_override",
+        "1536x1024",
+    )
+    kwargs = _build_openai_image_request_kwargs(
+        prompt="draw a cover",
+        model_name="gpt-image-1.5",
+        image_kind="cover",
+    )
+    assert kwargs["size"] == "1024x1024"
+
+
 def test_openai_image_request_builder_rejects_invalid_combo(monkeypatch):
     monkeypatch.setattr(
         "src.services.openai_service.settings.openai_image_quality_mode",

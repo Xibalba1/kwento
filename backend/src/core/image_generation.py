@@ -138,6 +138,7 @@ async def generate_single_page_illustration(
         prompt=illustration_prompt,
         reference_images=reference_images,
         page_index=max(0, page.page_number - 1),
+        image_kind="page",
     )
     page.content.illustration_prompt = illustration_prompt
 
@@ -206,6 +207,7 @@ class IllustrationStrategy(ABC):
             prompt=illustration_prompt,
             reference_images=reference_images,
             page_index=max(0, page.page_number - 1),
+            image_kind="page",
         )
         response = await self.image_generator.generate(request)
         filename = f"{page.page_number}.png"
@@ -330,6 +332,7 @@ class IllustrationStrategy(ABC):
             prompt=cover_prompt,
             reference_images=reference_images,
             page_index=None,
+            image_kind="cover",
         )
         response = await self.image_generator.generate(request)
         saved_path = await asyncio.to_thread(
