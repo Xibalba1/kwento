@@ -47,18 +47,35 @@ class OpenAIImageGenerator:
         self.model = model or settings.openai_image_model
 
     async def generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
-        # The existing OpenAI image path is text-to-image only.
-        response = await openai_service.generate_image(
-            request.prompt,
-            model=self.model,
-            image_kind=request.image_kind,
-        )
-        image_b64 = response.data[0].b64_json
-        image_bytes = base64.b64decode(image_b64)
+        if request.reference_images:
+            reference_edit_model_override = settings.openai_image_reference_edit_model
+            response = await openai_service.generate_image_with_references(
+                prompt=request.prompt,
+                reference_images=request.reference_images,
+                model=reference_edit_model_override,
+                image_kind=request.image_kind,
+            )
+            image_bytes = response["image_bytes"]
+            metadata = response.get("metadata", {})
+            model_used = metadata.get("model") or reference_edit_model_override or self.model
+        else:
+            response = await openai_service.generate_image(
+                request.prompt,
+                model=self.model,
+                image_kind=request.image_kind,
+            )
+            image_b64 = response.data[0].b64_json
+            image_bytes = base64.b64decode(image_b64)
+            metadata = {
+                "generation_mode": "text_to_image",
+                "reference_image_count": 0,
+            }
+            model_used = self.model
         return ImageGenerationResponse(
             image_bytes=image_bytes,
             provider=self.provider,
-            model=self.model,
+            model=model_used,
+            metadata=metadata,
         )
 
 

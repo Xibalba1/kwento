@@ -13,6 +13,7 @@ Functions:
         Fetches an image from a specified URL and returns it as a PIL Image object.
 """
 import openai
+import base64
 from typing import Optional, Dict, Any
 
 # import time
@@ -82,6 +83,10 @@ def _resolve_openai_image_quality(model_name: str) -> str:
     if _is_dalle2_model(model_name):
         return "standard"
     return "auto"
+
+
+def _resolve_openai_reference_edit_quality() -> str:
+    return settings.openai_image_reference_edit_quality
 
 
 def _validate_openai_image_params(model_name: str, size: str, quality: str) -> None:
@@ -175,6 +180,80 @@ def _build_openai_image_request_kwargs(
         },
     )
     return request_kwargs
+
+
+def _build_openai_reference_edit_request_kwargs(
+    *,
+    prompt: str,
+    reference_image_b64: str,
+    model_name: str,
+    image_kind: str,
+) -> Dict[str, Any]:
+    size = _resolve_openai_image_size(model_name, image_kind=image_kind)
+    quality = _resolve_openai_reference_edit_quality()
+    input_fidelity = settings.openai_image_reference_edit_input_fidelity
+
+    request_kwargs: Dict[str, Any] = {
+        "model": model_name,
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:image/png;base64,{reference_image_b64}",
+                    },
+                ],
+            }
+        ],
+        "tools": [
+            {
+                "type": "image_generation",
+                "action": "edit",
+                "input_fidelity": input_fidelity,
+                "size": size,
+                "quality": quality,
+            }
+        ],
+    }
+    logger.info(
+        "OpenAI reference edit request params | openai_reference_edit_request=%s",
+        {
+            "model": model_name,
+            "image_kind": image_kind,
+            "size": size,
+            "quality": quality,
+            "input_fidelity": input_fidelity,
+            "tool_type": "image_generation",
+            "tool_action": "edit",
+        },
+    )
+    return request_kwargs
+
+
+def _extract_image_b64_from_responses_output(response: Any) -> str:
+    output_items = getattr(response, "output", None) or []
+    for item in output_items:
+        item_type = getattr(item, "type", None)
+        if item_type is None and isinstance(item, dict):
+            item_type = item.get("type")
+        if item_type != "image_generation_call":
+            continue
+        result = getattr(item, "result", None)
+        if result is None and isinstance(item, dict):
+            result = item.get("result")
+        if isinstance(result, str) and result:
+            return result
+        if isinstance(result, list):
+            for entry in result:
+                if isinstance(entry, str) and entry:
+                    return entry
+                if isinstance(entry, dict):
+                    value = entry.get("b64_json") or entry.get("data")
+                    if isinstance(value, str) and value:
+                        return value
+    raise ValueError("OpenAI reference-edit response did not include image output.")
 
 
 async def get_book_response(
@@ -289,6 +368,74 @@ async def generate_image(
     # Raise HTTPException if all retries fail
     raise HTTPException(
         status_code=500, detail=f"Error generating image after retries."
+    )
+
+
+async def generate_image_with_references(
+    prompt: str,
+    reference_images: list[bytes],
+    model: Optional[str] = None,
+    image_kind: str = "page",
+) -> Dict[str, Any]:
+    if not reference_images:
+        raise HTTPException(
+            status_code=500,
+            detail="Reference-edit generation requires at least one reference image.",
+        )
+
+    max_retries = 3
+    retry_delay_secs = 5
+    selected_model = (
+        model or settings.openai_image_reference_edit_model or settings.openai_image_model
+    )
+    reference_b64 = base64.b64encode(reference_images[0]).decode("utf-8")
+    request_kwargs = _build_openai_reference_edit_request_kwargs(
+        prompt=prompt,
+        reference_image_b64=reference_b64,
+        model_name=selected_model,
+        image_kind=image_kind,
+    )
+
+    for attempt in range(max_retries):
+        try:
+            response = await asyncio.to_thread(
+                openai.responses.create,
+                **request_kwargs,
+            )
+            image_b64 = _extract_image_b64_from_responses_output(response)
+            return {
+                "image_bytes": base64.b64decode(image_b64),
+                "metadata": {
+                    "generation_mode": "reference_edit",
+                    "reference_image_count": len(reference_images),
+                    "tool_type": "image_generation",
+                    "tool_action": "edit",
+                    "input_fidelity": settings.openai_image_reference_edit_input_fidelity,
+                    "quality": settings.openai_image_reference_edit_quality,
+                    "response_id": getattr(response, "id", None),
+                    "model": getattr(response, "model", None) or selected_model,
+                },
+            }
+        except ValueError as e:
+            logger.error(f"Invalid OpenAI reference-edit response: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Invalid OpenAI reference-edit response: {e}"
+            )
+        except (
+            openai.APIConnectionError,
+            openai.APITimeoutError,
+            openai.InternalServerError,
+            openai.RateLimitError,
+        ) as e:
+            logger.error(
+                "Error generating reference-edit image: %s. Retrying (%s/%s)...",
+                e,
+                attempt + 1,
+                max_retries,
+            )
+            await sleep(retry_delay_secs)
+    raise HTTPException(
+        status_code=500, detail="Error generating reference-edit image after retries."
     )
 
 

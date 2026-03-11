@@ -46,6 +46,30 @@ async def test_openai_image_generator_passes_cover_kind(mock_generate_image):
 
 
 @pytest.mark.asyncio
+@patch(
+    "src.services.image_generation_provider.openai_service.generate_image_with_references",
+    new_callable=AsyncMock,
+)
+async def test_openai_image_generator_uses_reference_edit_when_refs(
+    mock_generate_image_with_references,
+):
+    mock_generate_image_with_references.return_value = {
+        "image_bytes": b"ref-image-bytes",
+        "metadata": {"generation_mode": "reference_edit", "model": "gpt-5"},
+    }
+    generator = OpenAIImageGenerator(model="gpt-image-1.5")
+
+    response = await generator.generate(
+        ImageGenerationRequest(prompt="draw p2", reference_images=[b"seed"])
+    )
+
+    assert response.image_bytes == b"ref-image-bytes"
+    assert response.metadata["generation_mode"] == "reference_edit"
+    assert response.model == "gpt-5"
+    mock_generate_image_with_references.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_google_image_generator_is_mockable_without_network():
     fake_part = SimpleNamespace(inline_data=SimpleNamespace(data=b"google-image-bytes"))
     fake_response = SimpleNamespace(parts=[fake_part])

@@ -69,6 +69,12 @@ class Settings(BaseSettings):
             OpenAI model for text generation. Values: any supported OpenAI text model string.
         openai_image_model (str):
             OpenAI model for image generation. Values: any supported OpenAI image model string.
+        openai_image_reference_edit_model (Optional[str]):
+            Optional OpenAI model override for reference-image edit generation. Values: None or any supported OpenAI image model string.
+        openai_image_reference_edit_input_fidelity (Literal["low", "high"]):
+            OpenAI reference-edit input fidelity mode. Values: "low", "high".
+        openai_image_reference_edit_quality (Literal["auto", "low", "medium", "high"]):
+            OpenAI reference-edit quality mode. Values: "auto", "low", "medium", "high".
         openai_image_aspect_profile (str):
             OpenAI image sizing strategy. Values: "portrait_model_aware", "square".
         openai_image_size_override (Optional[str]):
@@ -121,6 +127,11 @@ class Settings(BaseSettings):
     image_generation_retry_use_jitter: bool = True
     openai_text_model: str = "gpt-5"
     openai_image_model: str = "gpt-image-1.5"
+    openai_image_reference_edit_model: Optional[str] = None
+    openai_image_reference_edit_input_fidelity: Literal["low", "high"] = "high"
+    openai_image_reference_edit_quality: Literal["auto", "low", "medium", "high"] = (
+        "high"
+    )
     openai_image_aspect_profile: Literal["portrait_model_aware", "square"] = (
         "portrait_model_aware"
     )

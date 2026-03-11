@@ -1,7 +1,9 @@
 import pytest
+import base64
 from unittest.mock import patch, MagicMock, AsyncMock
 from src.services.openai_service import (
     generate_image,
+    generate_image_with_references,
     get_book_response,
     _build_openai_image_request_kwargs,
 )
@@ -200,4 +202,76 @@ def test_openai_image_request_builder_rejects_invalid_combo(monkeypatch):
         _build_openai_image_request_kwargs(
             prompt="draw a fox",
             model_name="dall-e-3",
+        )
+
+
+@pytest.mark.asyncio
+@patch("src.services.openai_service.asyncio.to_thread", new_callable=AsyncMock)
+async def test_generate_image_with_references_uses_responses_edit_tool(mock_to_thread):
+    mock_to_thread.return_value = MagicMock(
+        id="resp_123",
+        model="gpt-5",
+        output=[MagicMock(type="image_generation_call", result=base64.b64encode(b"img").decode("utf-8"))],
+    )
+
+    response = await generate_image_with_references(
+        prompt="draw scene",
+        reference_images=[b"seed"],
+        model="gpt-5",
+        image_kind="page",
+    )
+
+    assert response["image_bytes"] == b"img"
+    assert response["metadata"]["generation_mode"] == "reference_edit"
+    assert response["metadata"]["tool_action"] == "edit"
+    _, kwargs = mock_to_thread.await_args
+    assert kwargs["model"] == "gpt-5"
+    assert kwargs["tools"][0]["type"] == "image_generation"
+    assert kwargs["tools"][0]["action"] == "edit"
+
+
+@pytest.mark.asyncio
+@patch("src.services.openai_service.asyncio.to_thread", new_callable=AsyncMock)
+async def test_generate_image_with_references_falls_back_to_openai_image_model(
+    mock_to_thread, monkeypatch
+):
+    mock_to_thread.return_value = MagicMock(
+        id="resp_456",
+        model="gpt-image-1.5",
+        output=[
+            MagicMock(
+                type="image_generation_call",
+                result=base64.b64encode(b"img-fallback").decode("utf-8"),
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "src.services.openai_service.settings.openai_image_reference_edit_model",
+        None,
+    )
+    monkeypatch.setattr(
+        "src.services.openai_service.settings.openai_image_model",
+        "gpt-image-1.5",
+    )
+
+    response = await generate_image_with_references(
+        prompt="draw scene",
+        reference_images=[b"seed"],
+        model=None,
+        image_kind="page",
+    )
+
+    assert response["image_bytes"] == b"img-fallback"
+    _, kwargs = mock_to_thread.await_args
+    assert kwargs["model"] == "gpt-image-1.5"
+
+
+@pytest.mark.asyncio
+async def test_generate_image_with_references_requires_reference_image():
+    with pytest.raises(Exception):
+        await generate_image_with_references(
+            prompt="draw scene",
+            reference_images=[],
+            model="gpt-5",
+            image_kind="page",
         )

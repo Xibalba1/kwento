@@ -222,6 +222,14 @@ class IllustrationStrategy(ABC):
                 "image_data": None,
                 "provider": response.provider,
                 "model": response.model,
+                "generation_mode": response.metadata.get("generation_mode", "unknown"),
+                "reference_image_count": response.metadata.get(
+                    "reference_image_count", 0
+                ),
+                "tool_type": response.metadata.get("tool_type"),
+                "tool_action": response.metadata.get("tool_action"),
+                "input_fidelity": response.metadata.get("input_fidelity"),
+                "provider_response_id": response.metadata.get("response_id"),
                 "saved_path": saved_path,
                 "used_reference_seed": used_reference_seed,
                 "generation_duration_seconds": duration_seconds,
@@ -343,6 +351,14 @@ class IllustrationStrategy(ABC):
             {
                 "provider": response.provider,
                 "model": response.model,
+                "generation_mode": response.metadata.get("generation_mode", "unknown"),
+                "reference_image_count": response.metadata.get(
+                    "reference_image_count", 0
+                ),
+                "tool_type": response.metadata.get("tool_type"),
+                "tool_action": response.metadata.get("tool_action"),
+                "input_fidelity": response.metadata.get("input_fidelity"),
+                "provider_response_id": response.metadata.get("response_id"),
                 "saved_path": saved_path,
                 "used_reference_seed": used_reference_seed,
                 "generation_duration_seconds": duration_seconds,
