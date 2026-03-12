@@ -13,7 +13,7 @@ Functions:
         Fetches an image from a specified URL and returns it as a PIL Image object.
 """
 import openai
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # import time
 import asyncio
@@ -57,9 +57,9 @@ def _resolve_openai_image_size(model_name: str) -> str:
         return "1024x1024"
 
     if _is_gpt_image_model(model_name):
-        return "1024x1536"
+        return "1024x1024"
     if _is_dalle3_model(model_name):
-        return "1024x1792"
+        return "1024x1024"
     if _is_dalle2_model(model_name):
         return "1024x1024"
 
@@ -171,9 +171,46 @@ def _build_openai_image_request_kwargs(prompt: str, model_name: str) -> Dict[str
     return request_kwargs
 
 
-async def get_book_response(
-    prompt_content: str, model: Optional[str] = None
-) -> str:
+def _log_openai_image_request(
+    *,
+    prompt: str,
+    model_name: str,
+    request_mode: str,
+    reference_images: Optional[List[bytes]] = None,
+) -> None:
+    mode = settings.image_prompt_observability_mode
+    if mode == "off":
+        return
+
+    max_chars = max(0, settings.image_prompt_log_max_chars)
+    prompt_preview = prompt[:max_chars] if max_chars else ""
+    reference_images = reference_images or []
+    log_payload: Dict[str, Any] = {
+        "provider": "openai",
+        "model": model_name,
+        "request_mode": request_mode,
+        "observability_mode": mode,
+        "prompt_char_count": len(prompt),
+        "reference_image_count": len(reference_images),
+        "reference_image_sizes_bytes": [len(img) for img in reference_images],
+    }
+    if mode == "full":
+        log_payload["prompt_sent_to_openai"] = prompt_preview
+        log_payload["prompt_truncated"] = len(prompt_preview) < len(prompt)
+
+    logger.info("OpenAI image request payload. | openai_request=%s", log_payload)
+
+
+def _prepare_reference_image_file(
+    reference_image_bytes: bytes, index: int
+) -> io.BytesIO:
+    reference_file = io.BytesIO(reference_image_bytes)
+    reference_file.name = f"reference_{index}.png"
+    reference_file.seek(0)
+    return reference_file
+
+
+async def get_book_response(prompt_content: str, model: Optional[str] = None) -> str:
     result = await get_book_response_with_metadata(
         prompt_content=prompt_content,
         model=model,
@@ -221,7 +258,9 @@ async def get_book_response_with_metadata(
         return {
             "content": msg_content,
             "provider": "openai",
-            "model": getattr(response, "model", None) or model or settings.openai_text_model,
+            "model": getattr(response, "model", None)
+            or model
+            or settings.openai_text_model,
             "response_id": getattr(response, "id", None),
             "usage": usage_dict,
             "latency_seconds": round(time.monotonic() - start, 3),
@@ -255,6 +294,11 @@ async def generate_image(
     request_kwargs = _build_openai_image_request_kwargs(
         prompt=prompt, model_name=selected_model
     )
+    _log_openai_image_request(
+        prompt=prompt,
+        model_name=selected_model,
+        request_mode="generate",
+    )
     for attempt in range(max_retries):
         try:
             response = await asyncio.to_thread(
@@ -281,6 +325,75 @@ async def generate_image(
     # Raise HTTPException if all retries fail
     raise HTTPException(
         status_code=500, detail=f"Error generating image after retries."
+    )
+
+
+async def generate_image_with_reference(
+    prompt: str,
+    reference_images: List[bytes],
+    model: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Generates an image using a reference image for style transfer via OpenAI's edit API.
+    """
+    if not reference_images:
+        raise HTTPException(
+            status_code=500,
+            detail="Reference image generation requires at least one reference image.",
+        )
+
+    max_retries = 3
+    retry_delay_secs = 5
+    selected_model = model or settings.openai_image_model
+    if not _is_gpt_image_model(selected_model):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "OpenAI seeded reference generation requires a GPT image model that "
+                f"supports image edits. Received '{selected_model}'."
+            ),
+        )
+
+    request_kwargs = _build_openai_image_request_kwargs(
+        prompt=prompt, model_name=selected_model
+    )
+    request_kwargs["input_fidelity"] = "high"
+    _log_openai_image_request(
+        prompt=prompt,
+        model_name=selected_model,
+        request_mode="edit",
+        reference_images=reference_images[:1],
+    )
+
+    for attempt in range(max_retries):
+        reference_file = _prepare_reference_image_file(reference_images[0], index=0)
+        try:
+            response = await asyncio.to_thread(
+                openai.images.edit,
+                image=[reference_file],
+                **request_kwargs,
+            )
+            return response
+        except ValueError as e:
+            logger.error(f"Invalid OpenAI image request configuration: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Invalid OpenAI image configuration: {e}"
+            )
+        except (
+            openai.APIConnectionError,
+            openai.APITimeoutError,
+            openai.InternalServerError,
+            openai.RateLimitError,
+        ) as e:
+            logger.error(
+                f"Error generating referenced image: {e}. Retrying ({attempt + 1}/{max_retries})..."
+            )
+            await sleep(retry_delay_secs)
+        finally:
+            reference_file.close()
+
+    raise HTTPException(
+        status_code=500, detail="Error generating image with reference after retries."
     )
 
 

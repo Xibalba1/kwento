@@ -46,10 +46,16 @@ class OpenAIImageGenerator:
         self.model = model or settings.openai_image_model
 
     async def generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
-        # The existing OpenAI image path is text-to-image only.
-        response = await openai_service.generate_image(
-            request.prompt, model=self.model
-        )
+        if request.reference_images:
+            response = await openai_service.generate_image_with_reference(
+                request.prompt,
+                reference_images=request.reference_images,
+                model=self.model,
+            )
+        else:
+            response = await openai_service.generate_image(
+                request.prompt, model=self.model
+            )
         image_b64 = response.data[0].b64_json
         image_bytes = base64.b64decode(image_b64)
         return ImageGenerationResponse(
