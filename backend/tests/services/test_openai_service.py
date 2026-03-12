@@ -2,10 +2,12 @@ import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from src.services.openai_service import (
     generate_image,
+    generate_image_with_reference,
     get_book_response,
     _build_openai_image_request_kwargs,
 )
 import openai
+from fastapi import HTTPException
 
 
 @pytest.mark.asyncio
@@ -100,6 +102,55 @@ async def test_generate_image_uses_to_thread(mock_to_thread):
 
     assert response.data[0]["url"] == "http://example.com/image.png"
     assert mock_to_thread.await_count == 1
+
+
+@pytest.mark.asyncio
+@patch("openai.images.edit")
+async def test_generate_image_with_reference_success(mock_edit):
+    mock_edit.return_value = MagicMock(
+        data=[{"b64_json": "ZmFrZS1pbWFnZS1ieXRlcw=="}]
+    )
+
+    response = await generate_image_with_reference(
+        "draw with style",
+        reference_images=[b"seed-bytes", b"ignored-second-seed"],
+    )
+
+    mock_edit.assert_called_once()
+    _, kwargs = mock_edit.call_args
+    assert kwargs["model"] == "gpt-image-1.5"
+    assert kwargs["prompt"] == "draw with style"
+    assert kwargs["size"] == "1024x1536"
+    assert kwargs["quality"] == "medium"
+    assert kwargs["input_fidelity"] == "high"
+    assert len(kwargs["image"]) == 1
+    assert kwargs["image"][0].name == "reference_0.png"
+    kwargs["image"][0].seek(0)
+    assert kwargs["image"][0].read() == b"seed-bytes"
+    assert response.data[0]["b64_json"] == "ZmFrZS1pbWFnZS1ieXRlcw=="
+
+
+@pytest.mark.asyncio
+async def test_generate_image_with_reference_rejects_non_gpt_image_model():
+    with pytest.raises(HTTPException) as exc_info:
+        await generate_image_with_reference(
+            "draw with style",
+            reference_images=[b"seed-bytes"],
+            model="dall-e-3",
+        )
+
+    assert "requires a GPT image model" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_generate_image_with_reference_requires_seed():
+    with pytest.raises(HTTPException) as exc_info:
+        await generate_image_with_reference(
+            "draw with style",
+            reference_images=[],
+        )
+
+    assert "requires at least one reference image" in exc_info.value.detail
 
 
 def test_openai_image_request_builder_defaults_for_gpt_image():
