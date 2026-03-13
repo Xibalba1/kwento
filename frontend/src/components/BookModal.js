@@ -83,13 +83,13 @@ const BookModal = ({ book, onClose, onBackToLibrary }) => {
   return (
     <div style={styles.overlay}>
       <div style={styles.modal}>
-        {/* Back to Library Button */}
+        {/* Back to Book Shelf Button */}
         <button
           onClick={onBackToLibrary}
           style={styles.backButton}
-          aria-label="Back to Library"
+          aria-label="Back to Book Shelf"
         >
-          &#8592; Library {/* Left arrow and text */}
+          &#8592; Book Shelf {/* Left arrow and text */}
         </button>
 
         {/* Close Button */}
