@@ -224,7 +224,7 @@ const ThemeInput = ({
           onClick={onOpenLibrary}
           style={styles.libraryButton}
         >
-          My Library
+          My Book Shelf
         </button>
       </form>
     </div>

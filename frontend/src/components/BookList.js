@@ -1,8 +1,77 @@
 // kwento/frontend/src/components/BookList.js
 
-import React from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+
+const BookCoverImage = ({ coverUrl, bookTitle, onSizeChange }) => {
+  const [isVisible, setIsVisible] = useState(Boolean(coverUrl));
+
+  useEffect(() => {
+    setIsVisible(Boolean(coverUrl));
+  }, [coverUrl]);
+
+  if (!coverUrl || !isVisible) {
+    return null;
+  }
+
+  return (
+    <div style={styles.coverFrame}>
+      <img
+        src={coverUrl}
+        alt={`Cover for ${bookTitle}`}
+        style={styles.coverImage}
+        onLoad={onSizeChange}
+        onError={() => {
+          setIsVisible(false);
+          onSizeChange();
+        }}
+      />
+    </div>
+  );
+};
 
 const BookList = ({ books, loading, error, onRetry, onSelectBook, onClose }) => {
+  const buttonRefs = useRef({});
+  const [maxButtonHeight, setMaxButtonHeight] = useState(null);
+  const [layoutVersion, setLayoutVersion] = useState(0);
+
+  useLayoutEffect(() => {
+    if (books.length === 0) {
+      setMaxButtonHeight(null);
+      return;
+    }
+
+    const buttons = Object.values(buttonRefs.current).filter(Boolean);
+    if (buttons.length === 0) {
+      return;
+    }
+
+    buttons.forEach((button) => {
+      button.style.height = "auto";
+    });
+
+    const tallestHeight = Math.ceil(
+      Math.max(...buttons.map((button) => button.getBoundingClientRect().height)),
+    );
+
+    setMaxButtonHeight((currentHeight) =>
+      currentHeight === tallestHeight ? currentHeight : tallestHeight,
+    );
+  }, [books, layoutVersion]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setLayoutVersion((currentVersion) => currentVersion + 1);
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
+
+  const handleSizeChange = () => {
+    setLayoutVersion((currentVersion) => currentVersion + 1);
+  };
 
   if (loading) {
     return (
@@ -54,20 +123,38 @@ const BookList = ({ books, loading, error, onRetry, onSelectBook, onClose }) => 
         </button>
 
         {/* Modal Title */}
-        <h2 style={styles.title}>My Library</h2>
+        <h2 style={styles.title}>My Book Shelf</h2>
 
         {/* Book List */}
         <ul style={styles.list}>
           {books.map((book) => (
             <li key={book.book_id} style={styles.listItem}>
               <button
-                style={styles.bookButton}
+                ref={(element) => {
+                  if (element) {
+                    buttonRefs.current[book.book_id] = element;
+                    return;
+                  }
+
+                  delete buttonRefs.current[book.book_id];
+                }}
+                style={{
+                  ...styles.bookButton,
+                  height: maxButtonHeight ? `${maxButtonHeight}px` : "auto",
+                }}
                 onClick={() => {
                   onSelectBook(book.book_id);
                   onClose(); // Close the BookList modal after selection
                 }}
               >
                 <span style={styles.bookTitle}>{book.book_title}</span>
+                <div style={styles.coverSlot}>
+                  <BookCoverImage
+                    coverUrl={book.cover_url}
+                    bookTitle={book.book_title}
+                    onSizeChange={handleSizeChange}
+                  />
+                </div>
               </button>
             </li>
           ))}
@@ -131,16 +218,16 @@ const styles = {
     margin: 0,
   },
   listItem: {
-    // No additional styles needed
+    display: "flex",
   },
   bookButton: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-start",
     flexDirection: 'column',
     width: "100%",
-    minHeight: '120px',
-    padding: "25px",
+    minHeight: '220px',
+    padding: "16px",
     backgroundColor: "#FFCC00",
     border: "none",
     borderRadius: "8px",
@@ -148,6 +235,7 @@ const styles = {
     transition: "background-color 0.2s",
     textAlign: "center",
     boxShadow: "rgba(0, 0, 0, 0.15) 1.95px 1.95px 2.6px",
+    gap: "8px",
   },
   bookTitle: {
     fontSize: "20px",
@@ -155,6 +243,31 @@ const styles = {
     wordBreak: "break-word",
     overflowWrap: "break-word",
     width: '100%',
+    flexShrink: 0,
+  },
+  coverSlot: {
+    width: "100%",
+    flex: 1,
+    minHeight: "180px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  coverFrame: {
+    width: "100%",
+    maxWidth: "220px",
+    aspectRatio: "3 / 4",
+    borderRadius: "8px",
+    overflow: "hidden",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  coverImage: {
+    width: "100%",
+    height: "100%",
+    display: "block",
+    objectFit: "cover",
   },
   message: {
     textAlign: "center",
