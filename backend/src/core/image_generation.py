@@ -640,3 +640,36 @@ async def generate_page_illustrations(
         artifact_context["cover_result"] = cover_result
 
     return illustrations, cover_result
+
+
+async def generate_cover_from_reference(
+    book: Book,
+    reference_image_bytes: bytes,
+    *,
+    strategy_name: Optional[str] = None,
+    image_generator: Optional[ImageGenerator] = None,
+    prompt_path_version: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Generates only the cover image for an existing book using a provided seed reference.
+    """
+    if not reference_image_bytes:
+        raise ValueError("reference_image_bytes is required to generate a cover.")
+
+    book_id_str = str(book.book_id)
+    book_dir = construct_storage_path(book_id_str)
+
+    if not settings.use_cloud_storage:
+        ensure_directory_exists(book_dir)
+
+    strategy = get_illustration_strategy(
+        strategy_name=strategy_name,
+        image_generator=image_generator,
+    )
+    return await strategy._generate_cover_with_retry(
+        book=book,
+        book_dir=book_dir,
+        reference_images=[reference_image_bytes],
+        used_reference_seed=True,
+        prompt_path_version=prompt_path_version or settings.prompt_path_version,
+    )

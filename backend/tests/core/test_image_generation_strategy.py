@@ -8,6 +8,7 @@ from src.core import image_generation
 from src.core.image_generation import (
     LegacyIllustrationStrategy,
     SeededReferenceEditStrategy,
+    generate_cover_from_reference,
     get_illustration_strategy,
 )
 from src.services.image_generation_provider import (
@@ -228,3 +229,73 @@ async def test_seeded_strategy_fails_whole_book_after_retries(monkeypatch):
 
     with pytest.raises(image_generation.ImageGenerationPipelineError):
         await strategy.generate(book, book_dir="book", images_dir="book/images")
+
+
+@pytest.mark.asyncio
+async def test_generate_cover_from_reference_uses_cover_prompt_and_reference(monkeypatch):
+    fake_generator = FakeImageGenerator()
+    book = _make_book()
+
+    monkeypatch.setattr(
+        image_generation.image_service,
+        "save_image",
+        lambda image_data, relative_filepath: f"saved://{relative_filepath}",
+    )
+
+    result = await generate_cover_from_reference(
+        book,
+        b"seed-reference",
+        image_generator=fake_generator,
+    )
+
+    assert result["saved_path"] == f"saved://{book.book_id}/cover.png"
+    assert result["used_reference_seed"] is True
+    assert len(fake_generator.requests) == 1
+    request = fake_generator.requests[0]
+    assert request.reference_images == [b"seed-reference"]
+    assert request.page_index is None
+
+    prompt_body = json.loads(
+        request.prompt[len(pt.PROMPT_PAGE_ILLUSTRATION_PREFACE) :].strip()
+    )
+    assert prompt_body["text_content"] == (
+        f"Book title: {book.book_title}. Plot synopsis: {book.plot_synopsis}"
+    )
+    assert "This is a book cover illustration." in prompt_body["SYSTEM_NOTES"]["4"]
+
+
+@pytest.mark.asyncio
+async def test_generate_cover_from_reference_retries(monkeypatch):
+    generator = RetryImageGenerator(failures_before_success=1)
+    book = _make_book()
+
+    monkeypatch.setattr(
+        image_generation.image_service,
+        "save_image",
+        lambda image_data, relative_filepath: f"saved://{relative_filepath}",
+    )
+    monkeypatch.setattr(image_generation.settings, "image_generation_retry_attempts", 3)
+    monkeypatch.setattr(
+        image_generation.settings,
+        "image_generation_retry_backoff_base_seconds",
+        0.0,
+    )
+    monkeypatch.setattr(
+        image_generation.settings,
+        "image_generation_retry_backoff_max_seconds",
+        0.0,
+    )
+    monkeypatch.setattr(
+        image_generation.settings,
+        "image_generation_retry_use_jitter",
+        False,
+    )
+
+    result = await generate_cover_from_reference(
+        book,
+        b"seed-reference",
+        image_generator=generator,
+    )
+
+    assert result["attempt_count"] == 2
+    assert generator.calls == 2
