@@ -121,9 +121,7 @@ class Settings(BaseSettings):
     image_generation_retry_use_jitter: bool = True
     openai_text_model: str = "gpt-5"
     openai_image_model: str = "gpt-image-1.5"
-    openai_image_aspect_profile: Literal["portrait_model_aware", "square"] = (
-        "portrait_model_aware"
-    )
+    openai_image_aspect_profile: Literal["portrait_model_aware", "square"] = "square"
     openai_image_size_override: Optional[str] = None
     openai_image_quality_mode: Literal[
         "medium_model_aware", "auto", "low", "medium", "high", "standard", "hd"
