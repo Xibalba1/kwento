@@ -112,9 +112,9 @@ class Settings(BaseSettings):
         "seeded_reference_edit"
     )
     text_provider: Literal["google", "openai", "anthropic", "xai"] = "openai"
-    image_provider: Literal["google", "openai", "anthropic", "xai"] = "openai"
-    image_generation_min_workers: int = 2
-    image_generation_max_workers: int = 4
+    image_provider: Literal["google", "openai", "anthropic", "xai"] = "google"
+    image_generation_min_workers: int = 3
+    image_generation_max_workers: int = 5
     image_generation_retry_attempts: int = 3
     image_generation_retry_backoff_base_seconds: float = 0.5
     image_generation_retry_backoff_max_seconds: float = 8.0
@@ -133,7 +133,7 @@ class Settings(BaseSettings):
     openai_image_background: Optional[Literal["transparent", "opaque", "auto"]] = None
     google_text_model: str = "gemini-3.1-flash-lite-preview"
     google_image_model: str = "gemini-3.1-flash-image-preview"
-    google_image_aspect_ratio: str = "3:4"
+    google_image_aspect_ratio: str = "1:1"
     google_image_size: str = "2K"
     image_prompt_observability_mode: Literal["off", "metadata", "full"] = "metadata"
     image_prompt_log_max_chars: int = 12000
