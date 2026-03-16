@@ -1,4 +1,4 @@
-PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS = """Write a children's book. IMPORTANT!! ENSURE YOUR RESPONSE IS **LESS** THAN 1301 WORDS / 2201 TOTAL_TOKENS.:
+PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS = """Write a children's book. IMPORTANT!! ENSURE YOUR RESPONSE IS **LESS** THAN 2000 WORDS / 3300 TOTAL_TOKENS.:
  - **Theme**: {theme}
  - **Plot**:
     - Interesting, adventurous, and fun!
@@ -7,7 +7,7 @@ PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS = """Write a children's book. IMPORTANT!! E
   - Should capture the spirit of adventure, theme, and emotion in the story, without being too direct or generic.
   - Aim for a unique, memorable, and evocative title that appeals to children’s imaginations.
   - Avoid overly descriptive titles that summarize the story; instead, think of titles that spark curiosity and wonder about the character’s journey or adventure.
- - **Reading level**: early toddlers.
+ - **Reading level**: Pre-schoolers.
  - **Characters**:
     - There should be between 1 and 5 characters in the book
     - Characters should have distinct personalities and behaviors
@@ -19,10 +19,10 @@ PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS = """Write a children's book. IMPORTANT!! E
     - Setting changes can be moderate (Ex: moving from one room of a building to another) or dramatic (Ex: traveling from galaxy to another!)
     - Be sure to describe the setting in `illustration` values for each page so that the generated illustrations can maintain visual consistency when there is not a setting change. (Ex: if an elephant and a monkey are climbing a hill, mention the hill in each page when that action is ongoing.)
  - **`book_length_n_pages`**
-    - Length may vary as needed, consistent with the reading level of the intended audience
+    - Length may vary as needed, but should be at least 10 pages.
     - The parameter of 10 in the example output format below is an example only
     - number of entries in `pages` should *EXACTLY* match `book_length_n_pages`
-    - ensure the number of pages *WILL NOT* result in a response greater than 1301 WORDS / 2201 TOTAL_TOKENS
+    - ensure the number of pages *WILL NOT* result in a response greater than 2000 WORDS / 3300 TOTAL_TOKENS
  - **`illustration_values`**:
     - *DO NOT* include any dialogue or text to be depicted in the image. All dialogue should be in the `text_content_of_this_page` value for a given page.
     - Will be used to generate images, so, to keep them coherent, make sure to mention the setting of the image, even if the setting is the same as in the previous page. The setting should be described in detail in `illustration` values.
@@ -31,7 +31,7 @@ PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS = """Write a children's book. IMPORTANT!! E
     - should be very descriptive
     - These descriptions will be used to generate multiple images, so we need sufficient detail to generate consistent depictions of the characters. 
  - **Ensure output is valid JSON (i.e. no syntax errors, opening/closing braces match, escape double quotes in strings, etc.)**
- - **Your response length**: *DO NOT EXCEED 1301 WORDS / 2201 TOTAL_TOKENS* Consider this length limit in determing all parameter values!!
+ - **Your response length**: *DO NOT EXCEED 2000 WORDS / 3300 TOTAL_TOKENS* Consider this length limit in determing all parameter values!!
  
 OUTPUT FORMAT:
 """

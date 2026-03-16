@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     image_generation_strategy: Literal["legacy", "seeded_reference_edit"] = (
         "seeded_reference_edit"
     )
-    text_provider: Literal["google", "openai", "anthropic", "xai"] = "openai"
+    text_provider: Literal["google", "openai", "anthropic", "xai"] = "google"
     image_provider: Literal["google", "openai", "anthropic", "xai"] = "google"
     image_generation_min_workers: int = 3
     image_generation_max_workers: int = 5
