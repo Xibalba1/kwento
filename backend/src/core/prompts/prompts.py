@@ -1,3 +1,4 @@
+# backend/src/core/prompts/prompts.py
 PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS = """Write a children's book. IMPORTANT!! ENSURE YOUR RESPONSE IS **LESS** THAN 1301 WORDS / 2201 TOTAL_TOKENS.:
  - **Theme**: {theme}
  - **Plot**:
@@ -136,7 +137,7 @@ TEMPLATE_CHILDRENS_BOOK_V2 = """{
 
 Now generate the completed JSON book following all rules above."""
 
-PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS_V3 = """Write a children's book. IMPORTANT!! ENSURE YOUR RESPONSE IS **LESS** THAN 1301 WORDS / 2201 TOTAL_TOKENS.:
+PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS_V3 = """Write a children's book. IMPORTANT!! ENSURE YOUR RESPONSE IS **LESS** THAN 2000 WORDS / 3300 TOTAL_TOKENS.:
  - **Theme**: {theme}
  - **Plot**:
     - Interesting, adventurous, and fun!
@@ -145,7 +146,7 @@ PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS_V3 = """Write a children's book. IMPORTANT!
   - Should capture the spirit of adventure, theme, and emotion in the story, without being too direct or generic.
   - Aim for a unique, memorable, and evocative title that appeals to children’s imaginations.
   - Avoid overly descriptive titles that summarize the story; instead, think of titles that spark curiosity and wonder about the character’s journey or adventure.
- - **Reading level**: early toddlers.
+ - **Reading level**: Pre-schoolers.
  - **Characters**:
     - There should be between 1 and 5 characters in the book
     - Characters should have distinct personalities and behaviors
@@ -159,10 +160,10 @@ PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS_V3 = """Write a children's book. IMPORTANT!
     - Reuse `setting_id` when the setting has not changed.
     - In each page `illustration`, describe setting details so generated illustrations remain visually coherent.
  - **`book_length_n_pages`**
-    - Length may vary as needed, consistent with the reading level of the intended audience
+    - Length may vary as needed, but should be no less than 10 pages.
     - The parameter of 10 in the example output format below is an example only
     - number of entries in `pages` should *EXACTLY* match `book_length_n_pages`
-    - ensure the number of pages *WILL NOT* result in a response greater than 1301 WORDS / 2201 TOTAL_TOKENS
+    - ensure the number of pages *WILL NOT* result in a response greater than 2000 WORDS / 3300 TOTAL_TOKENS
  - **`illustration_values`**:
     - *DO NOT* include any dialogue or text to be depicted in the image. All dialogue should be in the `text_content_of_this_page` value for a given page.
     - Will be used to generate images, so, to keep them coherent, make sure to mention the setting of the image, even if the setting is the same as in the previous page. The setting should be described in detail in `illustration` values.
@@ -171,7 +172,7 @@ PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS_V3 = """Write a children's book. IMPORTANT!
     - should be very descriptive
     - These descriptions will be used to generate multiple images, so we need sufficient detail to generate consistent depictions of the characters.
  - **Ensure output is valid JSON (i.e. no syntax errors, opening/closing braces match, escape double quotes in strings, etc.)**
- - **Your response length**: *DO NOT EXCEED 1301 WORDS / 2201 TOTAL_TOKENS* Consider this length limit in determing all parameter values!!
+ - **Your response length**: *DO NOT EXCEED 2000 WORDS / 3300 TOTAL_TOKENS* Consider this length limit in determing all parameter values!!
 
 OUTPUT FORMAT:
 """
@@ -574,6 +575,50 @@ ILLUSTRATION_STYLE_ATTRIBUTES = [
         "Detail Level": "Moderate",
     },
 ]
+
+ILLUSTRATION_STYLE_ATTRIBUTES_V2 = [
+    "Simple, cartoonish style with thick outlines and bright, primary colors.",
+    "Soft watercolor washes with gentle, soothing color transitions.",
+    "Vibrant and textured illustrations with bold, expressive brushstrokes.",
+    "Playful, hand-drawn doodles with a sketchy, dynamic feel.",
+    "Flat design with minimal shading, focusing on bold, geometric shapes.",
+    "Realistic, detailed animals in lush, nature-inspired scenes.",
+    "Whimsical, abstract style using unusual shapes and exaggerated features.",
+    "Chalk pastel textures with a warm, fuzzy feeling and muted tones.",
+    "Vintage-inspired, muted color palette with textured backgrounds.",
+    "3D-rendered characters with smooth, rounded forms and soft lighting.",
+    "Collage-style using cut-out paper textures, layering shapes and colors.",
+    "Digital illustrations with high contrast and glossy, polished finishes.",
+    "Pastel crayons and pencil strokes creating a soft, nostalgic atmosphere.",
+    "Stylized, elongated characters with exaggerated proportions and movement.",
+    "Bold, comic book style with action-packed scenes.",
+    "Delicate, intricate line work with floral patterns and elegant details.",
+    "Neon accents and high-energy designs with a futuristic, dynamic flair.",
+    "Mixed media, combining photography and drawing for a surreal effect.",
+    "Black and white illustrations with intricate cross-hatching and shading.",
+    "Textured acrylic paint strokes, giving a rough, tactile feel to the pages.",
+    "Impressionistic brushstrokes creating dreamlike, flowing scenes.",
+    "Blocky, pixel art-inspired style with a retro video game aesthetic.",
+    "Bold, minimalistic shapes with a striking, limited color palette.",
+    "Organic, fluid lines that evoke a sense of movement and nature.",
+    "High-contrast silhouettes with dramatic lighting and shadow play.",
+    "Vintage comic strip style with sepia tones and retro text bubbles.",
+    "Stylized, angular shapes with sharp lines and a modern, edgy vibe.",
+    "Soft, plushy textures that evoke the feel of stuffed toys or fabric.",
+    "Hand-painted textures with visible brushstrokes and a lively color palette.",
+    "Rustic, folk art style with earthy tones and handcrafted details.",
+    "Pastel, dreamy clouds and soft character designs in a fantasy world.",
+    "Dynamic, action-focused poses with bright, energetic backgrounds.",
+    "Stained glass-inspired designs with sharp divisions and vibrant colors.",
+    "Delicate watercolor landscapes with minimal characters for a calm feel.",
+    "Whimsical, exaggerated characters with big eyes and quirky expressions.",
+    "Detailed, storybook fantasy art with intricate castles and magical creatures.",
+    "High-detail line drawings filled with intricate patterns and hidden details.",
+    "Playful, scribbly lines mimicking a child’s own drawings.",
+    "Hand-cut, paper puppet style with layers and textural elements.",
+    "17th-century Flemish masterpiece painting style",
+]
+
 PROMPT_PAGE_ILLUSTRATION_PREFACE = """Create an illustration for children's book according to the following specification (follow the specification *EXACTLY*):"""
 PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE = (
     "Extract and use the illustration style of the attached image. "

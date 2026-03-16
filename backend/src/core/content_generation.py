@@ -357,7 +357,7 @@ async def generate_book(theme: str, request_id: Optional[str] = None) -> Book:
         assign_book_model_relationships(book)
 
         # Set illustration style
-        style_attributes = random.choice(pt.ILLUSTRATION_STYLE_ATTRIBUTES)
+        style_attributes = random.choice(pt.ILLUSTRATION_STYLE_ATTRIBUTES_V2)
         book.illustration_style = style_attributes
 
         # One work unit per page illustration, one for cover, and one for persisting book JSON.
