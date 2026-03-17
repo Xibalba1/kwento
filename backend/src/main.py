@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routers import books
+from core.content_generation import initialize_illustration_style_sequence
 
 
 app = FastAPI(title="Kwento API", version="1.0.0")
@@ -20,3 +21,8 @@ app.add_middleware(
 
 # Include routers
 app.include_router(books.router, prefix="/books", tags=["books"])
+
+
+@app.on_event("startup")
+async def startup_event():
+    initialize_illustration_style_sequence()

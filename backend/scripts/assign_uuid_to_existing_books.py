@@ -1,4 +1,4 @@
-# Path: /Users/ik/repos/kwento/backend/src/utils/assign_uuid_to_existing_books.py
+# Path: /backend/scripts/assign_uuid_to_existing_books.py
 
 import os
 import json
