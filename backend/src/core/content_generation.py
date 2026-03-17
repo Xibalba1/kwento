@@ -5,6 +5,7 @@ import random
 import time
 import hashlib
 import inspect
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from config import settings
@@ -26,12 +27,66 @@ from utils.general_utils import (
 logger = get_logger(__name__)
 
 
+_STYLE_SEQUENCE_LOCK = threading.RLock()
+_STYLE_SEQUENCE: list[dict[str, Any]] = []
+_STYLE_INDEX = 0
+
+
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _style_id(style: Dict[str, Any]) -> str:
+    return str(style.get("style_id") or "unknown")
+
+
+def initialize_illustration_style_sequence() -> None:
+    global _STYLE_SEQUENCE, _STYLE_INDEX
+
+    styles = list(pt.ILLUSTRATION_STYLE_ATTRIBUTES)
+    if not styles:
+        raise ValueError("ILLUSTRATION_STYLE_ATTRIBUTES must contain at least one style.")
+
+    shuffled_styles = list(styles)
+    if len(shuffled_styles) > 1:
+        while True:
+            random.shuffle(shuffled_styles)
+            if shuffled_styles != styles:
+                break
+
+    with _STYLE_SEQUENCE_LOCK:
+        _STYLE_SEQUENCE = shuffled_styles
+        _STYLE_INDEX = 0
+
+    logger.info(
+        "Initialized illustration style rotation: style_ids=%s",
+        [_style_id(style) for style in shuffled_styles],
+    )
+
+
+def _next_illustration_style() -> tuple[Dict[str, Any], int]:
+    global _STYLE_INDEX
+
+    with _STYLE_SEQUENCE_LOCK:
+        if not _STYLE_SEQUENCE:
+            initialize_illustration_style_sequence()
+
+        sequence_position = _STYLE_INDEX
+        selected_style = _STYLE_SEQUENCE[sequence_position]
+        _STYLE_INDEX += 1
+        wrapped = False
+        if _STYLE_INDEX >= len(_STYLE_SEQUENCE):
+            _STYLE_INDEX = 0
+            wrapped = True
+
+    if wrapped:
+        logger.info("Illustration style rotation wrapped to sequence_position=0")
+
+    return selected_style, sequence_position
 
 
 def _capture_stage_duration(
@@ -357,8 +412,16 @@ async def generate_book(theme: str, request_id: Optional[str] = None) -> Book:
         assign_book_model_relationships(book)
 
         # Set illustration style
-        style_attributes = random.choice(pt.ILLUSTRATION_STYLE_ATTRIBUTES)
+        style_attributes, style_sequence_position = _next_illustration_style()
         book.illustration_style = style_attributes
+        logger.info(
+            "Selected illustration style for generation run: style_id=%s style_display_name=%s book_id=%s request_id=%s sequence_position=%s",
+            style_attributes.get("style_id"),
+            style_attributes.get("style_display_name"),
+            book.book_id,
+            request_id,
+            style_sequence_position,
+        )
 
         # One work unit per page illustration, one for cover, and one for persisting book JSON.
         progress.set_stage("generating_illustrations")

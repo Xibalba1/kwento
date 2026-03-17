@@ -10,6 +10,8 @@ from src.core.image_generation import (
     SeededReferenceEditStrategy,
     generate_cover_from_reference,
     get_illustration_strategy,
+    make_cover_prompt,
+    make_illustration_prompt,
 )
 from src.services.image_generation_provider import (
     ImageGenerationRequest,
@@ -66,6 +68,12 @@ def _make_page(page_number: int, illustration_text: str):
     return SimpleNamespace(page_number=page_number, content=content, book_parent=book_parent)
 
 
+def _extract_prompt_body(prompt: str) -> dict:
+    preface_index = prompt.index(pt.PROMPT_PAGE_ILLUSTRATION_PREFACE)
+    body_text = prompt[preface_index + len(pt.PROMPT_PAGE_ILLUSTRATION_PREFACE) :].strip()
+    return json.loads(body_text)
+
+
 def _make_book():
     return SimpleNamespace(
         book_id=uuid.uuid4(),
@@ -80,6 +88,10 @@ def _make_book():
             _make_page(3, "Scene 3"),
         ],
     )
+
+
+def _character(name: str, appearance: str = "appearance"):
+    return SimpleNamespace(name=name, appearance=appearance)
 
 
 def test_get_illustration_strategy_routes_from_config(monkeypatch):
@@ -131,21 +143,27 @@ async def test_seeded_strategy_uses_seed_reference_for_subsequent_pages(monkeypa
     prompt_two = page_requests[1].prompt
     prompt_three = page_requests[2].prompt
 
-    body_one = json.loads(prompt_one[len(pt.PROMPT_PAGE_ILLUSTRATION_PREFACE) :].strip())
-    body_two = json.loads(prompt_two[len(pt.PROMPT_PAGE_ILLUSTRATION_PREFACE) :].strip())
-    body_three = json.loads(prompt_three[len(pt.PROMPT_PAGE_ILLUSTRATION_PREFACE) :].strip())
+    body_one = _extract_prompt_body(prompt_one)
+    body_two = _extract_prompt_body(prompt_two)
+    body_three = _extract_prompt_body(prompt_three)
 
     assert "illustration_style" in body_one
-    assert "illustration_style" not in body_two
-    assert "illustration_style" not in body_three
-    assert "4" not in body_one["SYSTEM_NOTES"]
-    assert (
-        body_two["SYSTEM_NOTES"]["4"]
-        == pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE
+    assert "illustration_style" in body_two
+    assert "illustration_style" in body_three
+    assert body_one["duplication_rule"].startswith("Depict each listed character exactly once")
+    assert body_two["single_moment_rule"].startswith("Render one continuous moment in time")
+    assert body_three["motion_without_duplication_rule"].startswith(
+        "Show motion through pose"
     )
     assert (
-        body_three["SYSTEM_NOTES"]["4"]
-        == pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE
+        body_two["SYSTEM_NOTES"]["12"].startswith(
+            pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE
+        )
+    )
+    assert (
+        body_three["SYSTEM_NOTES"]["12"].startswith(
+            pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE
+        )
     )
     assert cover_result["saved_path"] == "saved://book/cover.png"
 
@@ -157,6 +175,89 @@ def test_seeded_strategy_worker_count():
     assert strategy._determine_parallel_workers(2) == 2
     assert strategy._determine_parallel_workers(3) == 3
     assert strategy._determine_parallel_workers(10) == 4
+
+
+def test_make_illustration_prompt_adds_duplication_controls():
+    page = _make_page(1, "June runs toward the kite.")
+    page.content.text_content_of_this_page = "June runs fast."
+    page.content.characters_in_this_page_data = [
+        _character("June", "yellow overalls"),
+        _character("Pip", "small brown puppy"),
+    ]
+    page.book_parent.illustration_style = {
+        "style_id": "bold_cartoon_watercolor",
+        "style_display_name": "graphic cartoon watercolor",
+    }
+
+    body = _extract_prompt_body(make_illustration_prompt(page))
+
+    assert body["characters_in_illustration"] == [
+        {"name": "June", "appearance": "yellow overalls", "count": 1},
+        {"name": "Pip", "appearance": "small brown puppy", "count": 1},
+    ]
+    assert body["character_cardinality_summary"] == "June: 1; Pip: 1"
+    assert body["allowed_duplicate_characters"] == []
+    assert body["duplication_rule"].startswith("Depict each listed character exactly once")
+    assert body["single_moment_rule"].startswith("Render one continuous moment in time")
+    assert body["motion_without_duplication_rule"].startswith(
+        "Show motion through pose"
+    )
+    assert body["SYSTEM_NOTES"]["7"].startswith("Depict each listed character exactly once")
+    assert body["SYSTEM_NOTES"]["8"].startswith("Render one continuous moment in time")
+    assert "montage" in body["SYSTEM_NOTES"]["9"]
+    assert "allowed number of times" in body["SYSTEM_NOTES"]["11"]
+
+
+def test_make_illustration_prompt_enables_explicit_duplication_exception():
+    page = _make_page(1, "June appears twice in the same image, with two versions of June jumping rope.")
+    page.content.text_content_of_this_page = "The same character appears twice."
+    page.content.characters_in_this_page_data = [
+        _character("June", "yellow overalls"),
+    ]
+
+    body = _extract_prompt_body(make_illustration_prompt(page))
+
+    assert body["allowed_duplicate_characters"] == ["June"]
+    assert body["characters_in_illustration"] == [
+        {"name": "June", "appearance": "yellow overalls", "count": 2}
+    ]
+    assert body["duplication_rule"] == (
+        "Duplication is intentional only for: June. All other listed characters must appear exactly once."
+    )
+
+
+def test_make_illustration_prompt_keeps_exact_once_for_ambiguous_repeat_language():
+    page = _make_page(1, "June runs again toward the hill.")
+    page.content.text_content_of_this_page = "June tries again."
+    page.content.characters_in_this_page_data = [
+        _character("June", "yellow overalls"),
+    ]
+
+    body = _extract_prompt_body(make_illustration_prompt(page))
+
+    assert body["allowed_duplicate_characters"] == []
+    assert body["characters_in_illustration"] == [
+        {"name": "June", "appearance": "yellow overalls", "count": 1}
+    ]
+
+
+def test_make_cover_prompt_adds_duplication_controls():
+    book = _make_book()
+    book.characters = [_character("June", "yellow overalls"), _character("Pip", "brown puppy")]
+    book.illustration_style = {
+        "style_id": "storybook_gouache",
+        "style_display_name": "matte gouache painting",
+    }
+
+    body = _extract_prompt_body(make_cover_prompt(book))
+
+    assert body["character_cardinality_summary"] == "June: 1; Pip: 1"
+    assert body["allowed_duplicate_characters"] == []
+    assert body["characters_in_illustration"] == [
+        {"name": "June", "appearance": "yellow overalls", "count": 1},
+        {"name": "Pip", "appearance": "brown puppy", "count": 1},
+    ]
+    assert body["SYSTEM_NOTES"]["12"].startswith("This is a book cover illustration")
 
 
 @pytest.mark.asyncio

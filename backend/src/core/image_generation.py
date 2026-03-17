@@ -32,6 +32,53 @@ class ImageGenerationPipelineError(RuntimeError):
     pass
 
 
+STYLE_LEGACY_KEYS = (
+    "Dimensionality/Depth",
+    "Color Palette",
+    "Line Quality",
+    "Texture",
+    "Character Style",
+    "Perspective",
+    "Movement",
+    "Composition",
+    "Use of Space",
+    "Lighting",
+    "Mood/Atmosphere",
+    "Medium",
+    "Detail Level",
+)
+
+CHARACTER_DUPLICATION_TRIGGER_PHRASES = (
+    "same character appears twice",
+    "two versions of",
+    "three versions of",
+    "several versions of",
+    "repeated in the same image",
+    "repeated in the same picture",
+    "appears again in the same picture",
+    "appears again in the same image",
+    "montage",
+    "comic strip",
+    "storyboard",
+    "sequence of poses",
+)
+
+CHARACTER_DUPLICATION_GENERIC_PHRASES = (
+    "multiple",
+    "more than one",
+)
+
+CHARACTER_DUPLICATION_RULE = (
+    "Depict each listed character exactly once unless this prompt explicitly allows duplication for that character."
+)
+SINGLE_MOMENT_RULE = (
+    "Render one continuous moment in time, not multiple beats or different moments from the same scene."
+)
+MOTION_WITHOUT_DUPLICATION_RULE = (
+    "Show motion through pose, gesture, composition, and camera framing, not by repeating the same body multiple times."
+)
+
+
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -40,26 +87,241 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _extract_legacy_style_attributes(style: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(style, dict):
+        return {key: None for key in STYLE_LEGACY_KEYS}
+    return {key: style.get(key) for key in STYLE_LEGACY_KEYS}
+
+
+def _style_list(style: Optional[Dict[str, Any]], key: str) -> list[str]:
+    if not isinstance(style, dict):
+        return []
+    value = style.get(key, [])
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item]
+
+
+def _style_text(style: Optional[Dict[str, Any]], key: str) -> Optional[str]:
+    if not isinstance(style, dict):
+        return None
+    value = style.get(key)
+    if value is None:
+        return None
+    return str(value)
+
+
+def _build_style_prompt_fields(style: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    legacy_attributes = _extract_legacy_style_attributes(style)
+    immutable_constraints = _style_list(style, "immutable_attributes")
+    return {
+        "illustration_style": legacy_attributes,
+        "style_id": _style_text(style, "style_id"),
+        "style_display_name": _style_text(style, "style_display_name"),
+        "style_brief": _style_text(style, "style_brief"),
+        "style_must_have_visual_traits": _style_list(
+            style, "must_have_visual_traits"
+        ),
+        "style_must_not_have_visual_traits": _style_list(
+            style, "must_not_have_visual_traits"
+        ),
+        "style_visual_anchor_cues": _style_list(style, "visual_anchor_cues"),
+        "style_immutable_constraints": immutable_constraints,
+        "style_flexible_guidance": _style_list(style, "flexible_attributes"),
+        "style_execution_priority": [
+            "Preserve the immutable style constraints first.",
+            "Honor the style brief and visual anchor cues next.",
+            "Let flexible guidance adapt framing, action, and composition without changing the overall style.",
+        ],
+        "style_consistency_goal": (
+            "Keep the same core rendering language across the entire book while allowing page-specific action, poses, expressions, and camera framing to change."
+        ),
+        "style_reference_alignment": (
+            "If a reference image is attached, treat it as the strongest example of the immutable style constraints and match it while still following the current page's scene description."
+            if immutable_constraints
+            else "If a reference image is attached, match its style while following the current page's scene description."
+        ),
+    }
+
+
+def _extract_duplication_count(combined_text: str) -> Optional[int]:
+    text = combined_text.lower()
+    if any(phrase in text for phrase in ("three times", "3 times", "three versions of")):
+        return 3
+    if any(
+        phrase in text
+        for phrase in (
+            "twice",
+            "2 times",
+            "two times",
+            "same character appears twice",
+            "two versions of",
+        )
+    ):
+        return 2
+    return None
+
+
+def _build_character_duplication_fields(
+    characters: list[dict[str, Any]],
+    *,
+    illustration_description: Optional[str],
+    text_content: Optional[str],
+) -> Dict[str, Any]:
+    combined_text = " ".join(
+        part for part in [illustration_description or "", text_content or ""] if part
+    )
+    lowered_text = combined_text.lower()
+    explicit_duplication_triggered = any(
+        phrase in lowered_text for phrase in CHARACTER_DUPLICATION_TRIGGER_PHRASES
+    )
+    character_names = [str(character.get("name")) for character in characters if character.get("name")]
+    named_characters_in_text = [
+        name for name in character_names if name.lower() in lowered_text
+    ]
+    generic_duplication_triggered = any(
+        phrase in lowered_text for phrase in CHARACTER_DUPLICATION_GENERIC_PHRASES
+    ) and bool(named_characters_in_text)
+    duplication_triggered = explicit_duplication_triggered or generic_duplication_triggered
+
+    allowed_duplicate_characters: list[str] = []
+    if duplication_triggered:
+        allowed_duplicate_characters = list(named_characters_in_text)
+        if not allowed_duplicate_characters:
+            allowed_duplicate_characters = character_names
+
+    duplicate_count = _extract_duplication_count(combined_text)
+    characters_with_counts = []
+    for character in characters:
+        count = 1
+        if (
+            duplicate_count is not None
+            and character.get("name") in allowed_duplicate_characters
+        ):
+            count = duplicate_count
+        characters_with_counts.append({**character, "count": count})
+
+    summary_parts = [
+        f"{character['name']}: {character['count']}"
+        for character in characters_with_counts
+        if character.get("name")
+    ]
+    summary = (
+        "; ".join(summary_parts) if summary_parts else "No named characters specified."
+    )
+
+    duplication_rule = CHARACTER_DUPLICATION_RULE
+    if allowed_duplicate_characters:
+        duplication_rule = (
+            "Duplication is intentional only for: "
+            + ", ".join(allowed_duplicate_characters)
+            + ". All other listed characters must appear exactly once."
+        )
+
+    return {
+        "characters_in_illustration": characters_with_counts,
+        "character_cardinality_summary": summary,
+        "duplication_rule": duplication_rule,
+        "single_moment_rule": SINGLE_MOMENT_RULE,
+        "motion_without_duplication_rule": MOTION_WITHOUT_DUPLICATION_RULE,
+        "allowed_duplicate_characters": allowed_duplicate_characters,
+    }
+
+
+def _humanize_style_name(style: Optional[Dict[str, Any]]) -> str:
+    display_name = _style_text(style, "style_display_name")
+    if display_name:
+        return display_name
+    style_id = _style_text(style, "style_id")
+    if style_id:
+        return style_id.replace("_", " ")
+    return "selected illustration style"
+
+
+def _top_style_traits(style: Optional[Dict[str, Any]], limit: int = 4) -> list[str]:
+    prioritized = _style_list(style, "immutable_attributes")
+    if len(prioritized) < limit:
+        prioritized.extend(_style_list(style, "visual_anchor_cues"))
+    seen: list[str] = []
+    for trait in prioritized:
+        if trait not in seen:
+            seen.append(trait)
+        if len(seen) >= limit:
+            break
+    return seen
+
+
+def _build_style_prose_directive(
+    style: Optional[Dict[str, Any]],
+    *,
+    use_reference: bool,
+    is_cover: bool,
+) -> str:
+    style_name = _humanize_style_name(style)
+    style_brief = _style_text(style, "style_brief") or "Keep the rendering visually distinctive."
+    immutable_traits = _top_style_traits(style)
+    negative_traits = _style_list(style, "must_not_have_visual_traits")[:3]
+
+    lines = [
+        f"Style directive: Use the {style_name} look. {style_brief}",
+    ]
+    if immutable_traits:
+        lines.append(
+            "Preserve these rendering traits above all else: "
+            + "; ".join(immutable_traits)
+            + "."
+        )
+    if negative_traits:
+        lines.append(
+            "Do not let the image drift into: "
+            + "; ".join(negative_traits)
+            + "."
+        )
+    if is_cover:
+        lines.append(
+            "Keep the same rendering language while allowing a stronger, more iconic cover composition and focal hierarchy."
+        )
+    else:
+        lines.append(
+            "Character action, posing, and camera framing may change from page to page, but the rendering language must stay in this same style family."
+        )
+    if use_reference:
+        lines.append(
+            "Use any attached reference image only to reinforce this same style direction; it must match the prose style directive rather than replace it."
+        )
+    return "\n".join(lines)
+
+
 def make_illustration_prompt(
     page: Page, include_style: bool = True, prompt_path_version: Optional[str] = None
 ) -> str:
     selected_prompt_path_version = prompt_path_version or settings.prompt_path_version
+    style = page.book_parent.illustration_style
     illustration_prompt = copy.deepcopy(pt.PROMPT_PAGE_ILLUSTRATION_BODY)
     illustration_prompt["SYSTEM_NOTES"] = dict(
         pt.PROMPT_PAGE_ILLUSTRATION_BODY.get("SYSTEM_NOTES", {})
     )
+    illustration_prompt.update(_build_style_prompt_fields(style))
     if include_style:
-        illustration_prompt["illustration_style"] = page.book_parent.illustration_style
+        illustration_prompt["SYSTEM_NOTES"]["12"] = (
+            "Use the style brief, must-have traits, negative constraints, anchor cues, and immutable constraints below as hard style guidance."
+        )
     else:
-        illustration_prompt.pop("illustration_style", None)
-        illustration_prompt["SYSTEM_NOTES"]["4"] = (
-            pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE
+        illustration_prompt["SYSTEM_NOTES"]["12"] = (
+            f"{pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE} Treat the attached image as the strongest style reference for the immutable constraints below."
         )
     illustration_prompt["illustration_description"] = page.content.illustration
-    illustration_prompt["characters_in_illustration"] = [
+    characters_in_illustration = [
         {"name": cinfo.name, "appearance": cinfo.appearance}
         for cinfo in page.content.characters_in_this_page_data
     ]
+    illustration_prompt.update(
+        _build_character_duplication_fields(
+            characters_in_illustration,
+            illustration_description=page.content.illustration,
+            text_content=page.content.text_content_of_this_page,
+        )
+    )
     if (
         selected_prompt_path_version in {"v2", "v3"}
         and getattr(page, "setting_id", None)
@@ -82,45 +344,69 @@ def make_illustration_prompt(
             setting.visual_anchor_details
         )
     illustration_prompt["text_content"] = page.content.text_content_of_this_page
+    prose_style_directive = _build_style_prose_directive(
+        style,
+        use_reference=not include_style,
+        is_cover=False,
+    )
     illustration_prompt_str = json.dumps(illustration_prompt, indent=1)
     illustration_prompt_str = (
-        f"{pt.PROMPT_PAGE_ILLUSTRATION_PREFACE}\n{illustration_prompt_str}"
+        f"{prose_style_directive}\n{pt.PROMPT_PAGE_ILLUSTRATION_PREFACE}\n{illustration_prompt_str}"
     )
     return illustration_prompt_str
 
 
 def make_cover_prompt(book: Book, prompt_path_version: Optional[str] = None) -> str:
     selected_prompt_path_version = prompt_path_version or settings.prompt_path_version
+    style = book.illustration_style
     cover_prompt = copy.deepcopy(pt.PROMPT_PAGE_ILLUSTRATION_BODY)
-    cover_prompt["SYSTEM_NOTES"] = dict(pt.PROMPT_PAGE_ILLUSTRATION_BODY.get("SYSTEM_NOTES", {}))
-    cover_prompt["SYSTEM_NOTES"]["4"] = (
+    cover_prompt["SYSTEM_NOTES"] = dict(
+        pt.PROMPT_PAGE_ILLUSTRATION_BODY.get("SYSTEM_NOTES", {})
+    )
+    cover_prompt["SYSTEM_NOTES"]["12"] = (
         "This is a book cover illustration. Compose a dynamic, title-forward scene without any rendered text."
     )
-    cover_prompt["SYSTEM_NOTES"]["5"] = (
+    cover_prompt["SYSTEM_NOTES"]["13"] = (
         "No letters, words, numbers, logos, captions, or speech bubbles in the final image."
     )
-    cover_prompt["SYSTEM_NOTES"]["6"] = (
-        pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE
+    cover_prompt["SYSTEM_NOTES"]["14"] = (
+        f"{pt.PROMPT_PAGE_ILLUSTRATION_SEEDED_REFERENCE_NOTE} Keep the cover in the same style family as the interior pages while allowing a stronger focal composition."
     )
-    cover_prompt["illustration_style"] = book.illustration_style
+    cover_prompt["SYSTEM_NOTES"]["15"] = (
+        "Preserve immutable style constraints from the selected style and any reference image, but allow the cover composition to be more iconic and title-forward."
+    )
+    cover_prompt.update(_build_style_prompt_fields(style))
     cover_prompt["illustration_description"] = (
         "Create a visually striking, toddler-friendly cover image that captures the heart of the story. "
         f"Story title context: {book.book_title}. "
         "Show characters in clear action with expressive faces, strong foreground subject focus, and a cohesive scene."
     )
-    cover_prompt["characters_in_illustration"] = [
+    cover_text_content = f"Book title: {book.book_title}. Plot synopsis: {book.plot_synopsis}"
+    cover_characters = [
         {"name": c.name, "appearance": c.appearance} for c in book.characters
     ]
+    cover_prompt.update(
+        _build_character_duplication_fields(
+            cover_characters,
+            illustration_description=cover_prompt["illustration_description"],
+            text_content=cover_text_content,
+        )
+    )
     if selected_prompt_path_version in {"v2", "v3"} and getattr(book, "settings", None):
         cover_prompt["settings_visual_anchor_details"] = [
             {"setting_name": s.name, "visual_anchor_details": s.visual_anchor_details}
             for s in book.settings
         ]
-    cover_prompt["text_content"] = (
-        f"Book title: {book.book_title}. Plot synopsis: {book.plot_synopsis}"
+    cover_prompt["text_content"] = cover_text_content
+    prose_style_directive = _build_style_prose_directive(
+        style,
+        use_reference=True,
+        is_cover=True,
     )
     cover_prompt_str = json.dumps(cover_prompt, indent=1)
-    return f"{pt.PROMPT_PAGE_ILLUSTRATION_PREFACE}\n{cover_prompt_str}"
+    return (
+        f"{prose_style_directive}\n{pt.PROMPT_PAGE_ILLUSTRATION_PREFACE}\n{cover_prompt_str}"
+    )
 
 
 async def generate_single_page_illustration(
