@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
+from core.generation_errors import ProviderRequestTimeoutError
 from src.services.openai_service import (
     generate_image,
     generate_image_with_reference,
@@ -28,6 +29,7 @@ async def test_generate_image_success(mock_generate):
         n=1,
         size="1024x1536",
         quality="medium",
+        timeout=55,
     )
     assert response.data[0]["url"] == "http://example.com/image.png"
 
@@ -38,7 +40,7 @@ async def test_generate_image_retry_success(mock_generate):
     # Mock exceptions for first two calls, then success
     mock_generate.side_effect = [
         openai.APIConnectionError("Connection error"),
-        openai.APITimeoutError("Timeout"),
+        openai.APIConnectionError("Connection error"),
         MagicMock(data=[{"url": "http://example.com/image.png"}]),
     ]
     prompt = "An illustration of a test"
@@ -77,7 +79,17 @@ async def test_get_book_response_success(mock_create):
 
     # Assertions
     mock_create.assert_called_once()
+    assert mock_create.call_args.kwargs["timeout"] == 55
     assert response == '{"book_title": "Test"}'
+
+
+@pytest.mark.asyncio
+@patch("openai.chat.completions.create")
+async def test_get_book_response_timeout_raises_provider_timeout(mock_create):
+    mock_create.side_effect = openai.APITimeoutError("Timeout")
+
+    with pytest.raises(ProviderRequestTimeoutError):
+        await get_book_response("Write a book about testing")
 
 
 @pytest.mark.asyncio
@@ -102,6 +114,15 @@ async def test_generate_image_uses_to_thread(mock_to_thread):
 
     assert response.data[0]["url"] == "http://example.com/image.png"
     assert mock_to_thread.await_count == 1
+
+
+@pytest.mark.asyncio
+@patch("openai.images.generate")
+async def test_generate_image_timeout_raises_provider_timeout(mock_generate):
+    mock_generate.side_effect = openai.APITimeoutError("Timeout")
+
+    with pytest.raises(ProviderRequestTimeoutError):
+        await generate_image("draw")
 
 
 @pytest.mark.asyncio

@@ -1,8 +1,10 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from core.generation_errors import ProviderRequestTimeoutError
 from src.services.text_generation_provider import (
     GoogleTextGenerator,
     OpenAITextGenerator,
@@ -52,3 +54,26 @@ def test_build_text_generator_routes_from_config(monkeypatch):
 
     generator = build_text_generator()
     assert isinstance(generator, OpenAITextGenerator)
+
+
+@pytest.mark.asyncio
+@patch("src.services.text_generation_provider.asyncio.to_thread", new_callable=AsyncMock)
+async def test_google_text_generator_timeout_raises_provider_timeout(
+    mock_to_thread, monkeypatch
+):
+    async def slow_call(*args, **kwargs):
+        await asyncio.sleep(0.05)
+
+    fake_client = SimpleNamespace(models=SimpleNamespace(generate_content=lambda **_: None))
+    mock_to_thread.side_effect = slow_call
+
+    with patch.object(GoogleTextGenerator, "_build_client", return_value=fake_client):
+        generator = GoogleTextGenerator(model="gemini-2.5-flash")
+
+    monkeypatch.setattr(
+        "src.services.text_generation_provider.settings.provider_request_timeout_seconds",
+        0.01,
+    )
+
+    with pytest.raises(ProviderRequestTimeoutError):
+        await generator.generate_book_response("write a book")

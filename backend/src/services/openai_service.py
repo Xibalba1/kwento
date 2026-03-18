@@ -25,6 +25,7 @@ import io
 from fastapi import HTTPException
 
 from config import settings
+from core.generation_errors import ProviderRequestTimeoutError
 from utils.general_utils import get_logger
 
 # initialize logger for this module
@@ -245,6 +246,7 @@ async def get_book_response_with_metadata(
             ],
             response_format={"type": "json_object"},
             model=model or settings.openai_text_model,
+            timeout=settings.provider_request_timeout_seconds,
         )
         msg_content = response.choices[0].message.content
         usage = getattr(response, "usage", None)
@@ -265,11 +267,18 @@ async def get_book_response_with_metadata(
             "usage": usage_dict,
             "latency_seconds": round(time.monotonic() - start, 3),
         }
+    except openai.APITimeoutError as e:
+        logger.error("OpenAI text generation timed out: %s", e)
+        raise ProviderRequestTimeoutError(
+            provider="openai",
+            model=model or settings.openai_text_model,
+            operation="text_generation",
+            timeout_seconds=settings.provider_request_timeout_seconds,
+            stage="generating_story",
+        ) from e
     except openai.OpenAIError as e:
         logger.error(f"OpenAI API error: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Error generating book content: {e}"
-        )
+        raise
 
 
 async def generate_image(
@@ -294,6 +303,7 @@ async def generate_image(
     request_kwargs = _build_openai_image_request_kwargs(
         prompt=prompt, model_name=selected_model
     )
+    request_kwargs["timeout"] = settings.image_provider_request_timeout_seconds
     _log_openai_image_request(
         prompt=prompt,
         model_name=selected_model,
@@ -311,9 +321,17 @@ async def generate_image(
             raise HTTPException(
                 status_code=500, detail=f"Invalid OpenAI image configuration: {e}"
             )
+        except openai.APITimeoutError as e:
+            logger.error("OpenAI image generation timed out: %s", e)
+            raise ProviderRequestTimeoutError(
+                provider="openai",
+                model=selected_model,
+                operation="image_generation",
+                timeout_seconds=settings.image_provider_request_timeout_seconds,
+                stage="generating_illustrations",
+            ) from e
         except (
             openai.APIConnectionError,
-            openai.APITimeoutError,
             openai.InternalServerError,
             openai.RateLimitError,
         ) as e:
@@ -358,6 +376,7 @@ async def generate_image_with_reference(
         prompt=prompt, model_name=selected_model
     )
     request_kwargs["input_fidelity"] = "high"
+    request_kwargs["timeout"] = settings.image_provider_request_timeout_seconds
     _log_openai_image_request(
         prompt=prompt,
         model_name=selected_model,
@@ -379,9 +398,17 @@ async def generate_image_with_reference(
             raise HTTPException(
                 status_code=500, detail=f"Invalid OpenAI image configuration: {e}"
             )
+        except openai.APITimeoutError as e:
+            logger.error("OpenAI referenced image generation timed out: %s", e)
+            raise ProviderRequestTimeoutError(
+                provider="openai",
+                model=selected_model,
+                operation="image_generation",
+                timeout_seconds=settings.image_provider_request_timeout_seconds,
+                stage="generating_illustrations",
+            ) from e
         except (
             openai.APIConnectionError,
-            openai.APITimeoutError,
             openai.InternalServerError,
             openai.RateLimitError,
         ) as e:

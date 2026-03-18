@@ -45,6 +45,14 @@ class Settings(BaseSettings):
             Enables periodic generation progress logs. Values: True, False.
         generation_progress_log_interval_seconds (int):
             Progress log interval. Values: positive integers.
+        story_generation_timeout_seconds (int):
+            App-level timeout for story text generation. Values: positive integers.
+        total_generation_timeout_seconds (int):
+            App-level timeout for the full book generation workflow. Values: positive integers.
+        provider_request_timeout_seconds (int):
+            Provider SDK/request timeout for text generation calls. Values: positive integers.
+        image_provider_request_timeout_seconds (int):
+            Provider SDK/request timeout for image generation calls. Values: positive integers.
         prompt_path_version (Literal["v1", "v2", "v3"]):
             Story prompt/schema path selector. Values: "v1", "v2", "v3".
         image_generation_strategy (Literal["legacy", "seeded_reference_edit"]):
@@ -107,6 +115,10 @@ class Settings(BaseSettings):
     gcs_service_account_json: Optional[str] = None
     enable_generation_progress_estimation: bool = True
     generation_progress_log_interval_seconds: int = 10
+    story_generation_timeout_seconds: int = 60
+    total_generation_timeout_seconds: int = 300
+    provider_request_timeout_seconds: int = 55
+    image_provider_request_timeout_seconds: int = 55
     prompt_path_version: Literal["v1", "v2", "v3"] = "v3"
     image_generation_strategy: Literal["legacy", "seeded_reference_edit"] = (
         "seeded_reference_edit"
