@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from src.core.content_generation import (
@@ -8,18 +9,17 @@ from src.core.content_generation import (
     _next_illustration_style,
 )
 from src.core import content_generation
+from core.generation_errors import (
+    BookGenerationTimeoutError,
+    ProviderRequestTimeoutError,
+    StoryGenerationTimeoutError,
+)
 from src.core.prompts import prompts as pt
 from src.api.models.book_models import Book
 
 
-@pytest.mark.asyncio
-@patch("src.core.content_generation.generate_page_illustrations")
-@patch("src.core.content_generation.build_text_generator")
-async def test_generate_book(
-    mock_build_text_generator, mock_generate_page_illustrations, monkeypatch, caplog
-):
-    # Mock OpenAI's response for get_book_response
-    assistant_message = """
+def _book_response_json() -> str:
+    return """
     {
         "book_title": "The Adventures of Testy McTestface",
         "book_length_n_pages": 2,
@@ -65,8 +65,16 @@ async def test_generate_book(
         ]
     }
     """
+
+
+@pytest.mark.asyncio
+@patch("src.core.content_generation.generate_page_illustrations")
+@patch("src.core.content_generation.build_text_generator")
+async def test_generate_book(
+    mock_build_text_generator, mock_generate_page_illustrations, monkeypatch, caplog
+):
     mock_generator = MagicMock()
-    mock_generator.generate_book_response = AsyncMock(return_value=assistant_message)
+    mock_generator.generate_book_response = AsyncMock(return_value=_book_response_json())
     mock_build_text_generator.return_value = mock_generator
     selected_style = next(
         style
@@ -112,6 +120,93 @@ async def test_generate_book(
     mock_generator.generate_book_response.assert_awaited_once()
     mock_generate_page_illustrations.assert_called_once()
     assert "Selected illustration style for generation run:" in caplog.text
+
+
+@pytest.mark.asyncio
+@patch("src.core.content_generation._persist_generation_artifact")
+@patch("src.core.content_generation.build_text_generator")
+async def test_generate_book_story_timeout(
+    mock_build_text_generator, mock_persist_generation_artifact, monkeypatch
+):
+    async def never_return(_prompt):
+        await asyncio.sleep(0.05)
+
+    mock_generator = MagicMock(provider="openai", model="gpt-5")
+    mock_generator.generate_book_response = AsyncMock(side_effect=never_return)
+    mock_build_text_generator.return_value = mock_generator
+    monkeypatch.setattr(
+        content_generation.settings, "story_generation_timeout_seconds", 0.01
+    )
+    monkeypatch.setattr(
+        content_generation.settings, "total_generation_timeout_seconds", 1
+    )
+
+    with pytest.raises(StoryGenerationTimeoutError):
+        await generate_book("Testing Adventures", request_id="story-timeout")
+
+    artifact = mock_persist_generation_artifact.call_args.args[0]
+    assert artifact["run"]["timed_out"] is True
+    assert artifact["run"]["timeout_scope"] == "story_generation"
+    assert artifact["run"]["stage"] == "generating_story"
+    assert artifact["run"]["error"]["timed_out"] is True
+
+
+@pytest.mark.asyncio
+@patch("src.core.content_generation._persist_generation_artifact")
+@patch("src.core.content_generation.generate_page_illustrations")
+@patch("src.core.content_generation.build_text_generator")
+async def test_generate_book_total_timeout(
+    mock_build_text_generator,
+    mock_generate_page_illustrations,
+    mock_persist_generation_artifact,
+    monkeypatch,
+):
+    async def slow_images(*args, **kwargs):
+        await asyncio.sleep(0.05)
+
+    mock_generator = MagicMock(provider="openai", model="gpt-5")
+    mock_generator.generate_book_response = AsyncMock(return_value=_book_response_json())
+    mock_build_text_generator.return_value = mock_generator
+    mock_generate_page_illustrations.side_effect = slow_images
+    monkeypatch.setattr(
+        content_generation.settings, "story_generation_timeout_seconds", 1
+    )
+    monkeypatch.setattr(
+        content_generation.settings, "total_generation_timeout_seconds", 0.01
+    )
+
+    with pytest.raises(BookGenerationTimeoutError):
+        await generate_book("Testing Adventures", request_id="book-timeout")
+
+    artifact = mock_persist_generation_artifact.call_args.args[0]
+    assert artifact["run"]["timed_out"] is True
+    assert artifact["run"]["timeout_scope"] == "total_generation"
+    assert artifact["run"]["error"]["timed_out"] is True
+
+
+@pytest.mark.asyncio
+@patch("src.core.content_generation._persist_generation_artifact")
+@patch("src.core.content_generation.build_text_generator")
+async def test_generate_book_normalizes_provider_timeout(
+    mock_build_text_generator, mock_persist_generation_artifact
+):
+    mock_generator = MagicMock(provider="openai", model="gpt-5")
+    mock_generator.generate_book_response = AsyncMock(
+        side_effect=ProviderRequestTimeoutError(
+            provider="openai",
+            model="gpt-5",
+            operation="text_generation",
+            timeout_seconds=55,
+            stage="generating_story",
+        )
+    )
+    mock_build_text_generator.return_value = mock_generator
+
+    with pytest.raises(StoryGenerationTimeoutError):
+        await generate_book("Testing Adventures", request_id="provider-timeout")
+
+    artifact = mock_persist_generation_artifact.call_args.args[0]
+    assert artifact["run"]["timeout_scope"] == "story_generation"
 
 
 def test_build_story_prompt_selects_v2():

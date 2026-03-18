@@ -7,6 +7,7 @@ from typing import Any, Dict
 from typing import Optional, Protocol
 
 from config import settings
+from core.generation_errors import ProviderRequestTimeoutError
 from services import openai_service
 
 
@@ -83,15 +84,35 @@ class GoogleTextGenerator:
         return genai.Client()
 
     async def generate_book_response(self, prompt_content: str) -> str:
-        return await asyncio.to_thread(self._generate_sync, prompt_content)
+        try:
+            async with asyncio.timeout(settings.provider_request_timeout_seconds):
+                return await asyncio.to_thread(self._generate_sync, prompt_content)
+        except TimeoutError as exc:
+            raise ProviderRequestTimeoutError(
+                provider=self.provider,
+                model=self.model,
+                operation="text_generation",
+                timeout_seconds=settings.provider_request_timeout_seconds,
+                stage="generating_story",
+            ) from exc
 
     async def generate_book_response_with_metadata(
         self, prompt_content: str
     ) -> TextGenerationResult:
         started = time.monotonic()
-        response = await asyncio.to_thread(
-            self._generate_sync_with_metadata, prompt_content
-        )
+        try:
+            async with asyncio.timeout(settings.provider_request_timeout_seconds):
+                response = await asyncio.to_thread(
+                    self._generate_sync_with_metadata, prompt_content
+                )
+        except TimeoutError as exc:
+            raise ProviderRequestTimeoutError(
+                provider=self.provider,
+                model=self.model,
+                operation="text_generation",
+                timeout_seconds=settings.provider_request_timeout_seconds,
+                stage="generating_story",
+            ) from exc
         response["latency_seconds"] = round(time.monotonic() - started, 3)
         return TextGenerationResult(
             content=response.get("content", ""),

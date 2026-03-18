@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Protocol
 from PIL import Image
 
 from config import settings
+from core.generation_errors import ProviderRequestTimeoutError
 from services import openai_service
 from utils.general_utils import get_logger
 
@@ -86,7 +87,17 @@ class GoogleImageGenerator:
         return genai.Client()
 
     async def generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
-        response = await asyncio.to_thread(self._generate_sync, request)
+        try:
+            async with asyncio.timeout(settings.image_provider_request_timeout_seconds):
+                response = await asyncio.to_thread(self._generate_sync, request)
+        except TimeoutError as exc:
+            raise ProviderRequestTimeoutError(
+                provider=self.provider,
+                model=self.model,
+                operation="image_generation",
+                timeout_seconds=settings.image_provider_request_timeout_seconds,
+                stage="generating_illustrations",
+            ) from exc
         return ImageGenerationResponse(
             image_bytes=response,
             provider=self.provider,

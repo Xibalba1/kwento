@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 from types import SimpleNamespace
@@ -6,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from PIL import Image
 
+from core.generation_errors import ProviderRequestTimeoutError
 from src.services.image_generation_provider import (
     GoogleImageGenerator,
     ImageGenerationRequest,
@@ -77,3 +79,26 @@ async def test_google_image_generator_is_mockable_without_network():
     )
 
     assert response.image_bytes == b"google-image-bytes"
+
+
+@pytest.mark.asyncio
+@patch("src.services.image_generation_provider.asyncio.to_thread", new_callable=AsyncMock)
+async def test_google_image_generator_timeout_raises_provider_timeout(
+    mock_to_thread, monkeypatch
+):
+    async def slow_call(*args, **kwargs):
+        await asyncio.sleep(0.05)
+
+    fake_client = SimpleNamespace(models=SimpleNamespace(generate_content=lambda **_: None))
+    mock_to_thread.side_effect = slow_call
+
+    with patch.object(GoogleImageGenerator, "_build_client", return_value=fake_client):
+        generator = GoogleImageGenerator(model="gemini-image")
+
+    monkeypatch.setattr(
+        "src.services.image_generation_provider.settings.image_provider_request_timeout_seconds",
+        0.01,
+    )
+
+    with pytest.raises(ProviderRequestTimeoutError):
+        await generator.generate(ImageGenerationRequest(prompt="draw a fox"))

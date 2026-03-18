@@ -6,6 +6,7 @@ import time
 import hashlib
 import inspect
 import threading
+import asyncio
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from config import settings
@@ -15,6 +16,11 @@ from api.models.book_models import Book
 from api.models.helpers import assign_book_model_relationships, remove_book_model_relationships
 from core.prompts import prompts as pt
 from core.image_generation import generate_page_illustrations
+from core.generation_errors import (
+    BookGenerationTimeoutError,
+    ProviderRequestTimeoutError,
+    StoryGenerationTimeoutError,
+)
 from core.progress_estimation import GenerationProgressEstimator
 from utils.general_utils import (
     construct_storage_path,
@@ -111,6 +117,13 @@ def _build_generation_run_artifact(
             "finished_at": None,
             "total_duration_seconds": None,
             "error": None,
+            "timed_out": False,
+            "timeout_scope": None,
+            "timeout_seconds": None,
+            "stage": None,
+            "provider": None,
+            "model": None,
+            "elapsed_seconds": None,
         },
         "input": {
             "theme": theme,
@@ -123,6 +136,10 @@ def _build_generation_run_artifact(
             "image_generation_strategy": settings.image_generation_strategy,
             "text_provider": settings.text_provider,
             "image_provider": settings.image_provider,
+            "story_generation_timeout_seconds": settings.story_generation_timeout_seconds,
+            "total_generation_timeout_seconds": settings.total_generation_timeout_seconds,
+            "provider_request_timeout_seconds": settings.provider_request_timeout_seconds,
+            "image_provider_request_timeout_seconds": settings.image_provider_request_timeout_seconds,
             "text_model": {
                 "openai": settings.openai_text_model,
                 "google": settings.google_text_model,
@@ -278,6 +295,29 @@ def _extract_partial_cover_data(book: Optional[Book]) -> Optional[Dict[str, Any]
     }
 
 
+def _set_timeout_metadata(
+    artifact: Dict[str, Any],
+    *,
+    timeout_scope: str,
+    timeout_seconds: float,
+    stage: str,
+    provider: Optional[str],
+    model: Optional[str],
+    elapsed_seconds: Optional[float],
+) -> None:
+    artifact["run"].update(
+        {
+            "timed_out": True,
+            "timeout_scope": timeout_scope,
+            "timeout_seconds": timeout_seconds,
+            "stage": stage,
+            "provider": provider,
+            "model": model,
+            "elapsed_seconds": elapsed_seconds,
+        }
+    )
+
+
 def build_story_prompt(theme: str, prompt_path_version: str) -> str:
     if prompt_path_version == "v1":
         master_prompt = pt.PROMPT_MASTER_PLOT_AND_ILLUSTRATIONS.format(theme=theme)
@@ -330,6 +370,9 @@ async def generate_book(theme: str, request_id: Optional[str] = None) -> Book:
     failure_error: Optional[Exception] = None
     book: Optional[Book] = None
     book_id_str: Optional[str] = None
+    current_stage = "initializing"
+    current_provider: Optional[str] = None
+    current_model: Optional[str] = None
     prompt_path_version = settings.prompt_path_version
     generation_artifact = _build_generation_run_artifact(
         request_id=request_id,
@@ -339,208 +382,333 @@ async def generate_book(theme: str, request_id: Optional[str] = None) -> Book:
 
     await progress.start()
     try:
-        progress.set_stage("generating_story")
-        progress.add_total_work(1.0)
-        logger.info(f"Generating book with theme: {theme}")
-        logger.info(
-            "Using story prompt path version '%s' for book generation.",
-            prompt_path_version,
-        )
+        async def _run_generation_workflow() -> Book:
+            nonlocal book, book_id_str, success, current_stage, current_provider, current_model
 
-        stage_started = time.monotonic()
-        prompt_content = build_story_prompt(theme, prompt_path_version)
-        _capture_stage_duration(stage_timings, "prompt_build", stage_started)
-        generation_artifact["story_generation"]["prompt_full_text"] = prompt_content
-
-        # Get the book response
-        text_generator = build_text_generator()
-        stage_started = time.monotonic()
-        metadata_method = getattr(
-            text_generator, "generate_book_response_with_metadata", None
-        )
-        if inspect.iscoroutinefunction(metadata_method):
-            text_result_raw = await metadata_method(prompt_content)
-        else:
-            text_result_raw = await text_generator.generate_book_response(prompt_content)
-        text_result = _to_text_generation_result(
-            text_result_raw,
-            provider=settings.text_provider,
-            model={
-                "openai": settings.openai_text_model,
-                "google": settings.google_text_model,
-            }.get(settings.text_provider, ""),
-        )
-        _capture_stage_duration(stage_timings, "text_generation", stage_started)
-        assistant_message = text_result.content
-        generation_artifact["story_generation"]["response_raw_json"] = assistant_message
-        generation_artifact["story_generation"]["text_provider"] = text_result.provider
-        generation_artifact["story_generation"]["text_model"] = text_result.model
-        generation_artifact["story_generation"]["response_id"] = text_result.metadata.get(
-            "response_id"
-        )
-        generation_artifact["story_generation"]["usage"] = text_result.metadata.get(
-            "usage"
-        )
-        generation_artifact["story_generation"]["latency_seconds"] = (
-            text_result.metadata.get("latency_seconds")
-        )
-
-        # Parse the assistant's message into a Book object
-        stage_started = time.monotonic()
-        try:
-            book_data = json.loads(assistant_message)
-            book = Book(**book_data)
-            validate_book_for_prompt_path(book, prompt_path_version)
-            generation_artifact["story_generation"]["parse_status"] = "success"
-            book_id_str = str(book.book_id)
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error: {e}")
-            generation_artifact["story_generation"]["parse_status"] = "json_decode_error"
-            raise
-        except Exception as e:
-            logger.error(f"Error parsing book data: {e}")
-            generation_artifact["story_generation"]["parse_status"] = (
-                f"validation_error:{type(e).__name__}"
+            current_stage = "generating_story"
+            progress.set_stage("generating_story")
+            progress.add_total_work(1.0)
+            logger.info(f"Generating book with theme: {theme}")
+            logger.info(
+                "Using story prompt path version '%s' for book generation.",
+                prompt_path_version,
             )
-            raise
-        finally:
-            _capture_stage_duration(stage_timings, "json_parse_and_validation", stage_started)
 
-        progress.mark_work_completed(1.0, note="Story content generated.")
+            stage_started = time.monotonic()
+            prompt_content = build_story_prompt(theme, prompt_path_version)
+            _capture_stage_duration(stage_timings, "prompt_build", stage_started)
+            generation_artifact["story_generation"]["prompt_full_text"] = prompt_content
 
-        # Assign relationships
-        assign_book_model_relationships(book)
-
-        # Set illustration style
-        style_attributes, style_sequence_position = _next_illustration_style()
-        book.illustration_style = style_attributes
-        logger.info(
-            "Selected illustration style for generation run: style_id=%s style_display_name=%s book_id=%s request_id=%s sequence_position=%s",
-            style_attributes.get("style_id"),
-            style_attributes.get("style_display_name"),
-            book.book_id,
-            request_id,
-            style_sequence_position,
-        )
-
-        # One work unit per page illustration, one for cover, and one for persisting book JSON.
-        progress.set_stage("generating_illustrations")
-        progress.add_total_work(float(len(book.pages) + 2))
-
-        # Generate illustrations after creating the book
-        image_artifact_context: Dict[str, Any] = {}
-        stage_started = time.monotonic()
-        illustrations, cover_data = await generate_illustrations(
-            book,
-            progress,
-            prompt_path_version=prompt_path_version,
-            artifact_context=image_artifact_context,
-        )
-        _capture_stage_duration(stage_timings, "illustration_generation", stage_started)
-        generation_artifact["image_generation"]["duration_seconds"] = stage_timings.get(
-            "illustration_generation"
-        )
-        generation_artifact["image_generation"]["strategy"] = image_artifact_context.get(
-            "strategy", settings.image_generation_strategy
-        )
-        generation_artifact["image_generation"]["page_count"] = image_artifact_context.get(
-            "page_count", len(illustrations)
-        )
-        generation_artifact["image_generation"]["pages"] = image_artifact_context.get(
-            "page_results", []
-        )
-        cover_result = image_artifact_context.get("cover_result") or cover_data or {}
-        generation_artifact["cover_generation"] = {
-            **generation_artifact["cover_generation"],
-            "duration_seconds": cover_result.get("total_duration_seconds"),
-            "provider": cover_result.get("provider"),
-            "model": cover_result.get("model"),
-            "saved_path": cover_result.get("saved_path"),
-            "used_reference_seed": cover_result.get("used_reference_seed"),
-            "attempt_count": cover_result.get("attempt_count", 0),
-            "attempts": cover_result.get("attempts", []),
-            "cover_prompt": cover_result.get("cover_prompt"),
-            "cover_prompt_char_count": cover_result.get("cover_prompt_char_count", 0),
-            "cover_prompt_sha256": cover_result.get("cover_prompt_sha256"),
-            "signed_url_assigned": False,
-        }
-
-        expiration_time = timedelta(hours=1)
-        expires_at = datetime.now(timezone.utc) + expiration_time
-
-        for page_number, image_data in illustrations.items():
-            page = next((p for p in book.pages if p.page_number == page_number), None)
-            if page:
-                if settings.use_cloud_storage:
-                    image_path = f"{book.book_id}/images/{page_number}.png"
-                    url = generate_presigned_url(image_path, expiration=3600)
-                else:
-                    url = str(
-                        (
-                            Path(settings.local_data_path)
-                            / f"{book.book_id}/images/{page_number}.png"
-                        ).resolve()
-                    )
-
-                # Update illustration with URL and expiration metadata
-                page.content.illustration = {
-                    "url": url,
-                    "expires_at": expires_at,
-                }
-
-        if settings.use_cloud_storage:
-            cover_url = generate_presigned_url(f"{book.book_id}/cover.png", expiration=3600)
-        else:
-            cover_url = str(
-                (Path(settings.local_data_path) / f"{book.book_id}/cover.png").resolve()
+            text_generator = build_text_generator()
+            current_provider = getattr(text_generator, "provider", settings.text_provider)
+            current_model = getattr(
+                text_generator,
+                "model",
+                {
+                    "openai": settings.openai_text_model,
+                    "google": settings.google_text_model,
+                }.get(settings.text_provider, ""),
             )
-        book.cover = {
-            "url": cover_url,
-            "expires_at": expires_at,
-            "provider": cover_result.get("provider"),
-            "model": cover_result.get("model"),
-            "saved_path": cover_result.get("saved_path"),
-        }
-        generation_artifact["cover_generation"]["signed_url_assigned"] = True
+            stage_started = time.monotonic()
+            metadata_method = getattr(
+                text_generator, "generate_book_response_with_metadata", None
+            )
+            try:
+                async with asyncio.timeout(settings.story_generation_timeout_seconds):
+                    if inspect.iscoroutinefunction(metadata_method):
+                        text_result_raw = await metadata_method(prompt_content)
+                    else:
+                        text_result_raw = await text_generator.generate_book_response(
+                            prompt_content
+                        )
+            except ProviderRequestTimeoutError as exc:
+                elapsed_seconds = round(time.monotonic() - stage_started, 3)
+                logger.warning(
+                    "Story generation provider request timed out. provider=%s model=%s stage=%s elapsed_seconds=%s timeout_seconds=%s",
+                    exc.provider,
+                    exc.model,
+                    current_stage,
+                    elapsed_seconds,
+                    exc.timeout_seconds,
+                )
+                raise StoryGenerationTimeoutError(
+                    timeout_seconds=exc.timeout_seconds,
+                    stage=current_stage,
+                    provider=exc.provider,
+                    model=exc.model,
+                    elapsed_seconds=elapsed_seconds,
+                ) from exc
+            except TimeoutError as exc:
+                elapsed_seconds = round(time.monotonic() - stage_started, 3)
+                logger.warning(
+                    "Story generation timed out. provider=%s model=%s stage=%s elapsed_seconds=%s timeout_seconds=%s",
+                    current_provider,
+                    current_model,
+                    current_stage,
+                    elapsed_seconds,
+                    settings.story_generation_timeout_seconds,
+                )
+                raise StoryGenerationTimeoutError(
+                    timeout_seconds=settings.story_generation_timeout_seconds,
+                    stage=current_stage,
+                    provider=current_provider,
+                    model=current_model,
+                    elapsed_seconds=elapsed_seconds,
+                ) from exc
+            text_result = _to_text_generation_result(
+                text_result_raw,
+                provider=settings.text_provider,
+                model={
+                    "openai": settings.openai_text_model,
+                    "google": settings.google_text_model,
+                }.get(settings.text_provider, ""),
+            )
+            _capture_stage_duration(stage_timings, "text_generation", stage_started)
+            assistant_message = text_result.content
+            generation_artifact["story_generation"]["response_raw_json"] = assistant_message
+            generation_artifact["story_generation"]["text_provider"] = text_result.provider
+            generation_artifact["story_generation"]["text_model"] = text_result.model
+            generation_artifact["story_generation"]["response_id"] = text_result.metadata.get(
+                "response_id"
+            )
+            generation_artifact["story_generation"]["usage"] = text_result.metadata.get(
+                "usage"
+            )
+            generation_artifact["story_generation"]["latency_seconds"] = (
+                text_result.metadata.get("latency_seconds")
+            )
 
-        progress.set_stage("persisting_book_data")
-        stage_started = time.monotonic()
-        book_dir = construct_storage_path(book_id_str)
-        if not settings.use_cloud_storage:
-            ensure_directory_exists(book_dir)
-        book_copy_no_refs = remove_book_model_relationships(book.copy(deep=True))
-        book_data = book_copy_no_refs.dict()
-        write_json_file(
-            file_name=f"{book_id_str}.json",
-            data=book_data,
-            relative_path=book_dir,
-            metadata={
-                "artifact_type": "book_json",
-                "book_id": book_id_str,
-                "book_title": book.book_title,
-                "prompt_path_version": prompt_path_version,
-            },
-        )
-        _capture_stage_duration(stage_timings, "book_json_persist", stage_started)
-        progress.mark_work_completed(1.0, note="Book JSON persisted.")
+            current_stage = "parsing_story_response"
+            stage_started = time.monotonic()
+            try:
+                book_data = json.loads(assistant_message)
+                book = Book(**book_data)
+                validate_book_for_prompt_path(book, prompt_path_version)
+                generation_artifact["story_generation"]["parse_status"] = "success"
+                book_id_str = str(book.book_id)
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decode error: {e}")
+                generation_artifact["story_generation"]["parse_status"] = "json_decode_error"
+                raise
+            except Exception as e:
+                logger.error(f"Error parsing book data: {e}")
+                generation_artifact["story_generation"]["parse_status"] = (
+                    f"validation_error:{type(e).__name__}"
+                )
+                raise
+            finally:
+                _capture_stage_duration(
+                    stage_timings, "json_parse_and_validation", stage_started
+                )
 
-        usage = generation_artifact["story_generation"].get("usage") or {}
-        generation_artifact["cost_analytics"]["text_prompt_tokens"] = usage.get(
-            "prompt_tokens"
-        )
-        generation_artifact["cost_analytics"]["text_completion_tokens"] = usage.get(
-            "completion_tokens"
-        )
-        generation_artifact["cost_analytics"]["text_total_tokens"] = usage.get(
-            "total_tokens"
-        )
-        generation_artifact["cost_analytics"]["image_count_requested"] = len(book.pages) + 1
-        generation_artifact["cost_analytics"]["image_count_generated"] = len(
-            generation_artifact["image_generation"]["pages"]
-        ) + (1 if generation_artifact["cover_generation"]["saved_path"] else 0)
+            progress.mark_work_completed(1.0, note="Story content generated.")
 
-        success = True
-        return book
+            assign_book_model_relationships(book)
+
+            style_attributes, style_sequence_position = _next_illustration_style()
+            book.illustration_style = style_attributes
+            logger.info(
+                "Selected illustration style for generation run: style_id=%s style_display_name=%s book_id=%s request_id=%s sequence_position=%s",
+                style_attributes.get("style_id"),
+                style_attributes.get("style_display_name"),
+                book.book_id,
+                request_id,
+                style_sequence_position,
+            )
+
+            current_stage = "generating_illustrations"
+            current_provider = settings.image_provider
+            current_model = {
+                "openai": settings.openai_image_model,
+                "google": settings.google_image_model,
+            }.get(settings.image_provider)
+            progress.set_stage("generating_illustrations")
+            progress.add_total_work(float(len(book.pages) + 2))
+
+            image_artifact_context: Dict[str, Any] = {}
+            stage_started = time.monotonic()
+            illustrations, cover_data = await generate_illustrations(
+                book,
+                progress,
+                prompt_path_version=prompt_path_version,
+                artifact_context=image_artifact_context,
+            )
+            _capture_stage_duration(stage_timings, "illustration_generation", stage_started)
+            generation_artifact["image_generation"]["duration_seconds"] = stage_timings.get(
+                "illustration_generation"
+            )
+            generation_artifact["image_generation"]["strategy"] = image_artifact_context.get(
+                "strategy", settings.image_generation_strategy
+            )
+            generation_artifact["image_generation"]["page_count"] = image_artifact_context.get(
+                "page_count", len(illustrations)
+            )
+            generation_artifact["image_generation"]["pages"] = image_artifact_context.get(
+                "page_results", []
+            )
+            cover_result = image_artifact_context.get("cover_result") or cover_data or {}
+            generation_artifact["cover_generation"] = {
+                **generation_artifact["cover_generation"],
+                "duration_seconds": cover_result.get("total_duration_seconds"),
+                "provider": cover_result.get("provider"),
+                "model": cover_result.get("model"),
+                "saved_path": cover_result.get("saved_path"),
+                "used_reference_seed": cover_result.get("used_reference_seed"),
+                "attempt_count": cover_result.get("attempt_count", 0),
+                "attempts": cover_result.get("attempts", []),
+                "cover_prompt": cover_result.get("cover_prompt"),
+                "cover_prompt_char_count": cover_result.get("cover_prompt_char_count", 0),
+                "cover_prompt_sha256": cover_result.get("cover_prompt_sha256"),
+                "signed_url_assigned": False,
+            }
+
+            expiration_time = timedelta(hours=1)
+            expires_at = datetime.now(timezone.utc) + expiration_time
+
+            for page_number, image_data in illustrations.items():
+                page = next((p for p in book.pages if p.page_number == page_number), None)
+                if page:
+                    if settings.use_cloud_storage:
+                        image_path = f"{book.book_id}/images/{page_number}.png"
+                        url = generate_presigned_url(image_path, expiration=3600)
+                    else:
+                        url = str(
+                            (
+                                Path(settings.local_data_path)
+                                / f"{book.book_id}/images/{page_number}.png"
+                            ).resolve()
+                        )
+
+                    page.content.illustration = {
+                        "url": url,
+                        "expires_at": expires_at,
+                    }
+
+            if settings.use_cloud_storage:
+                cover_url = generate_presigned_url(
+                    f"{book.book_id}/cover.png", expiration=3600
+                )
+            else:
+                cover_url = str(
+                    (Path(settings.local_data_path) / f"{book.book_id}/cover.png").resolve()
+                )
+            book.cover = {
+                "url": cover_url,
+                "expires_at": expires_at,
+                "provider": cover_result.get("provider"),
+                "model": cover_result.get("model"),
+                "saved_path": cover_result.get("saved_path"),
+            }
+            generation_artifact["cover_generation"]["signed_url_assigned"] = True
+
+            current_stage = "persisting_book_data"
+            progress.set_stage("persisting_book_data")
+            stage_started = time.monotonic()
+            book_dir = construct_storage_path(book_id_str)
+            if not settings.use_cloud_storage:
+                ensure_directory_exists(book_dir)
+            book_copy_no_refs = remove_book_model_relationships(book.copy(deep=True))
+            book_data = book_copy_no_refs.dict()
+            write_json_file(
+                file_name=f"{book_id_str}.json",
+                data=book_data,
+                relative_path=book_dir,
+                metadata={
+                    "artifact_type": "book_json",
+                    "book_id": book_id_str,
+                    "book_title": book.book_title,
+                    "prompt_path_version": prompt_path_version,
+                },
+            )
+            _capture_stage_duration(stage_timings, "book_json_persist", stage_started)
+            progress.mark_work_completed(1.0, note="Book JSON persisted.")
+
+            usage = generation_artifact["story_generation"].get("usage") or {}
+            generation_artifact["cost_analytics"]["text_prompt_tokens"] = usage.get(
+                "prompt_tokens"
+            )
+            generation_artifact["cost_analytics"]["text_completion_tokens"] = usage.get(
+                "completion_tokens"
+            )
+            generation_artifact["cost_analytics"]["text_total_tokens"] = usage.get(
+                "total_tokens"
+            )
+            generation_artifact["cost_analytics"]["image_count_requested"] = (
+                len(book.pages) + 1
+            )
+            generation_artifact["cost_analytics"]["image_count_generated"] = len(
+                generation_artifact["image_generation"]["pages"]
+            ) + (1 if generation_artifact["cover_generation"]["saved_path"] else 0)
+
+            success = True
+            return book
+
+        async with asyncio.timeout(settings.total_generation_timeout_seconds):
+            return await _run_generation_workflow()
+    except StoryGenerationTimeoutError as e:
+        failure_error = e
+        _set_timeout_metadata(
+            generation_artifact,
+            timeout_scope="story_generation",
+            timeout_seconds=e.timeout_seconds,
+            stage=e.stage,
+            provider=e.provider,
+            model=e.model,
+            elapsed_seconds=e.elapsed_seconds,
+        )
+        raise
+    except ProviderRequestTimeoutError as e:
+        failure_error = BookGenerationTimeoutError(
+            timeout_seconds=e.timeout_seconds,
+            stage=current_stage,
+            provider=e.provider,
+            model=e.model,
+            elapsed_seconds=round(time.monotonic() - started_at, 3),
+        )
+        logger.warning(
+            "Book generation provider request timed out. provider=%s model=%s stage=%s elapsed_seconds=%s timeout_seconds=%s",
+            e.provider,
+            e.model,
+            current_stage,
+            failure_error.elapsed_seconds,
+            e.timeout_seconds,
+        )
+        _set_timeout_metadata(
+            generation_artifact,
+            timeout_scope="total_generation",
+            timeout_seconds=e.timeout_seconds,
+            stage=current_stage,
+            provider=e.provider,
+            model=e.model,
+            elapsed_seconds=failure_error.elapsed_seconds,
+        )
+        raise failure_error
+    except TimeoutError as e:
+        failure_error = BookGenerationTimeoutError(
+            timeout_seconds=settings.total_generation_timeout_seconds,
+            stage=current_stage,
+            provider=current_provider,
+            model=current_model,
+            elapsed_seconds=round(time.monotonic() - started_at, 3),
+        )
+        logger.warning(
+            "Book generation timed out. provider=%s model=%s stage=%s elapsed_seconds=%s timeout_seconds=%s",
+            current_provider,
+            current_model,
+            current_stage,
+            failure_error.elapsed_seconds,
+            settings.total_generation_timeout_seconds,
+        )
+        _set_timeout_metadata(
+            generation_artifact,
+            timeout_scope="total_generation",
+            timeout_seconds=settings.total_generation_timeout_seconds,
+            stage=current_stage,
+            provider=current_provider,
+            model=current_model,
+            elapsed_seconds=failure_error.elapsed_seconds,
+        )
+        raise failure_error from e
     except ValueError as e:
         failure_error = e
         if "content_policy_violation" in str(e):
@@ -558,12 +726,25 @@ async def generate_book(theme: str, request_id: Optional[str] = None) -> Book:
             time.monotonic() - started_at, 3
         )
         if not success:
-            generation_artifact["run"]["error"] = {
+            error_payload = {
                 "error_type": type(failure_error).__name__
                 if failure_error is not None
                 else "GenerationFailed",
                 "error_message": str(failure_error) if failure_error is not None else None,
             }
+            if generation_artifact["run"]["timed_out"]:
+                error_payload.update(
+                    {
+                        "timed_out": True,
+                        "timeout_scope": generation_artifact["run"]["timeout_scope"],
+                        "timeout_seconds": generation_artifact["run"]["timeout_seconds"],
+                        "stage": generation_artifact["run"]["stage"],
+                        "provider": generation_artifact["run"]["provider"],
+                        "model": generation_artifact["run"]["model"],
+                        "elapsed_seconds": generation_artifact["run"]["elapsed_seconds"],
+                    }
+                )
+            generation_artifact["run"]["error"] = error_payload
             if not generation_artifact["image_generation"]["pages"]:
                 partial_pages = _extract_partial_image_page_data(book)
                 generation_artifact["image_generation"]["pages"] = partial_pages

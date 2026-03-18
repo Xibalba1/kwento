@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from typing import List, Dict, Any
 from datetime import datetime, timedelta, timezone
 
@@ -18,6 +19,10 @@ from api.models.book_models import (
     ImageResponse,
 )
 from core import content_generation
+from core.generation_errors import (
+    BookGenerationTimeoutError,
+    StoryGenerationTimeoutError,
+)
 from utils.general_utils import (
     get_book_list,
     get_book_by_id,
@@ -99,6 +104,40 @@ async def create_book(book_request: BookCreateRequest):
 
         logger.info(f"Successfully constructed response for book: {book.book_title}")
         return response
+    except StoryGenerationTimeoutError as exc:
+        logger.warning(
+            "Story generation timed out. request_id=%s stage=%s provider=%s model=%s elapsed_seconds=%s timeout_seconds=%s",
+            request_id,
+            exc.stage,
+            exc.provider,
+            exc.model,
+            exc.elapsed_seconds,
+            exc.timeout_seconds,
+        )
+        return JSONResponse(
+            status_code=504,
+            content={
+                "detail": "Story generation timed out",
+                "request_id": request_id,
+            },
+        )
+    except BookGenerationTimeoutError as exc:
+        logger.warning(
+            "Book generation timed out. request_id=%s stage=%s provider=%s model=%s elapsed_seconds=%s timeout_seconds=%s",
+            request_id,
+            exc.stage,
+            exc.provider,
+            exc.model,
+            exc.elapsed_seconds,
+            exc.timeout_seconds,
+        )
+        return JSONResponse(
+            status_code=504,
+            content={
+                "detail": "Book generation timed out",
+                "request_id": request_id,
+            },
+        )
     except ValueError as ve:
         if str(ve) == "Content policy violation":
             raise HTTPException(
