@@ -6,7 +6,6 @@ const baseProps = {
   error: false,
   onRetry: jest.fn(),
   onSelectBook: jest.fn(),
-  onClose: jest.fn(),
 };
 
 const renderBookList = (books) =>
@@ -17,10 +16,69 @@ describe("BookList", () => {
     jest.clearAllMocks();
   });
 
-  test("renders title and cover image inside the book button when cover_url is present", () => {
+  test("renders the tab bar with Book Shelf active by default", () => {
     renderBookList([
       {
         book_id: "book-1",
+        book_title: "Default Shelf Book",
+      },
+    ]);
+
+    expect(screen.getByRole("tab", { name: /book shelf/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /archive/i })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("button", { name: /default shelf book/i })).toBeInTheDocument();
+  });
+
+  test("uses a shared label wrapper and consistent tab height for both tabs", () => {
+    renderBookList([
+      {
+        book_id: "book-shared-label",
+        book_title: "Shared Label Book",
+      },
+    ]);
+
+    const shelfTab = screen.getByRole("tab", { name: /book shelf/i });
+    const archiveTab = screen.getByRole("tab", { name: /archive/i });
+    const shelfLabel = screen.getByText("Book Shelf");
+    const archiveLabel = screen.getByText("Archive");
+
+    expect(shelfLabel.tagName).toBe("SPAN");
+    expect(archiveLabel.tagName).toBe("SPAN");
+    expect(shelfTab).toContainElement(shelfLabel);
+    expect(archiveTab).toContainElement(archiveLabel);
+    expect(shelfTab).toHaveStyle({ display: "flex", alignItems: "center", justifyContent: "center" });
+    expect(archiveTab).toHaveStyle({ display: "flex", alignItems: "center", justifyContent: "center" });
+    expect(shelfTab.style.height).toBe("52px");
+    expect(archiveTab.style.height).toBe("52px");
+    expect(shelfLabel).toHaveStyle({ minHeight: "100%" });
+    expect(archiveLabel).toHaveStyle({ minHeight: "100%" });
+  });
+
+  test("keeps a shared active-tab bridge without inactive-only label offsets", () => {
+    renderBookList([
+      {
+        book_id: "book-bridge",
+        book_title: "Bridge Book",
+      },
+    ]);
+
+    const bridge = screen.getByTestId("active-tab-bridge");
+    const shelfTab = screen.getByRole("tab", { name: /book shelf/i });
+    const archiveTab = screen.getByRole("tab", { name: /archive/i });
+
+    expect(bridge).toHaveStyle({ bottom: "-8px", height: "12px" });
+    expect(shelfTab.style.transform).toBe("");
+    expect(archiveTab.style.transform).toBe("");
+    expect(shelfTab.style.top).toBe("");
+    expect(archiveTab.style.top).toBe("");
+    expect(screen.getByText("Book Shelf")).not.toHaveStyle({ transform: expect.any(String) });
+    expect(screen.getByText("Archive")).not.toHaveStyle({ transform: expect.any(String) });
+  });
+
+  test("renders title and cover image inside the book button when cover_url is present", () => {
+    renderBookList([
+      {
+        book_id: "book-2",
         book_title: "The Cover Book",
         cover_url: "https://example.com/cover.png",
       },
@@ -46,7 +104,7 @@ describe("BookList", () => {
   test("renders title-only when cover_url is missing", () => {
     renderBookList([
       {
-        book_id: "book-2",
+        book_id: "book-3",
         book_title: "Title Only",
       },
     ]);
@@ -58,7 +116,7 @@ describe("BookList", () => {
   test("hides the image when it fails to load", async () => {
     renderBookList([
       {
-        book_id: "book-3",
+        book_id: "book-4",
         book_title: "Broken Cover",
         cover_url: "https://example.com/broken-cover.png",
       },
@@ -73,36 +131,76 @@ describe("BookList", () => {
     expect(screen.getByText("Broken Cover")).toBeInTheDocument();
   });
 
-  test("selects the book and closes the modal when clicked", () => {
+  test("selects the book when clicked", () => {
     const onSelectBook = jest.fn();
-    const onClose = jest.fn();
 
     render(
       <BookList
         {...baseProps}
         books={[
           {
-            book_id: "book-4",
+            book_id: "book-5",
             book_title: "Clickable Cover",
             cover_url: "https://example.com/cover.png",
           },
         ]}
         onSelectBook={onSelectBook}
-        onClose={onClose}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /clickable cover/i }));
 
-    expect(onSelectBook).toHaveBeenCalledWith("book-4");
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onSelectBook).toHaveBeenCalledWith("book-5");
+  });
+
+  test("switches to Archive and back to Book Shelf", () => {
+    renderBookList([
+      {
+        book_id: "book-6",
+        book_title: "Archive Toggle Book",
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("tab", { name: /archive/i }));
+
+    expect(screen.getByRole("tab", { name: /archive/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Archive is empty")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /archive toggle book/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: /book shelf/i }));
+
+    expect(screen.getByRole("tab", { name: /book shelf/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: /archive toggle book/i })).toBeInTheDocument();
+  });
+
+  test("renders loading state inline with tabs visible", () => {
+    render(<BookList {...baseProps} books={[]} loading />);
+
+    expect(screen.getByRole("tab", { name: /book shelf/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /archive/i })).toBeInTheDocument();
+    expect(screen.getByText("Loading books...")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /close modal/i })).not.toBeInTheDocument();
+  });
+
+  test("renders error state inline with tabs visible and retry action", () => {
+    const onRetry = jest.fn();
+
+    render(<BookList {...baseProps} books={[]} error onRetry={onRetry} />);
+
+    expect(screen.getByRole("tab", { name: /book shelf/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /archive/i })).toBeInTheDocument();
+    expect(screen.getByText("Error fetching books. Please try again later.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   test("sizes every book button to the tallest card in the grid", async () => {
     const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
 
     HTMLElement.prototype.getBoundingClientRect = jest.fn(function mockRect() {
-      if (this.tagName === "BUTTON") {
+      if (this.tagName === "BUTTON" && this.getAttribute("role") !== "tab") {
         if (this.textContent.includes("Tall Book")) {
           return { width: 200, height: 320, top: 0, left: 0, right: 200, bottom: 320 };
         }
@@ -115,11 +213,11 @@ describe("BookList", () => {
 
     renderBookList([
       {
-        book_id: "book-5",
+        book_id: "book-7",
         book_title: "Short Book",
       },
       {
-        book_id: "book-6",
+        book_id: "book-8",
         book_title: "Tall Book",
         cover_url: "https://example.com/tall-cover.png",
       },

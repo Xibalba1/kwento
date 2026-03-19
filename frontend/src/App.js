@@ -14,7 +14,6 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [, setExistingBookLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false); // Controls BookModal visibility
-  const [isLibraryOpen, setIsLibraryOpen] = useState(false); // Controls BookList visibility
   const [libraryBooks, setLibraryBooks] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryError, setLibraryError] = useState(false);
@@ -167,17 +166,7 @@ const App = () => {
     setBook(null); // Reset the book state
   };
 
-  // Handler to open the BookList modal
-  const handleOpenLibrary = () => {
-    setIsLibraryOpen(true);
-  };
-
-  // Handler to close the BookList modal
-  const handleCloseLibrary = () => {
-    setIsLibraryOpen(false);
-  };
-
-  // Handler to fetch a book by ID (triggered from BookList modal)
+  // Handler to fetch a book by ID (triggered from BookList)
   const handleSelectBook = async (bookId) => {
     setExistingBookLoading(true);
     setBook(null);
@@ -220,12 +209,6 @@ const App = () => {
     }
   };
 
-  // Handler to navigate back to the library from BookModal
-  const handleBackToLibrary = () => {
-    handleCloseModal();
-    handleOpenLibrary();
-  };
-
   return (
     <div style={styles.container}>
       <h1 style={styles.mainTitle}>Kwento</h1>
@@ -235,8 +218,13 @@ const App = () => {
         setTheme={setTheme}
         onSubmit={handleGenerateBook}
         loading={loading}
+      />
+      <BookList
+        books={libraryBooks}
+        loading={libraryLoading}
+        error={libraryError}
+        onRetry={() => fetchLibraryBooks({ force: true })}
         onSelectBook={handleSelectBook}
-        onOpenLibrary={handleOpenLibrary}
       />
 
       {/* Render the BookModal if a book is selected and modal is open */}
@@ -244,19 +232,6 @@ const App = () => {
         <BookModal
           book={book}
           onClose={handleCloseModal}
-          onBackToLibrary={handleBackToLibrary} // Pass the handler to BookModal
-        />
-      )}
-
-      {/* Render the BookList modal if it is open */}
-      {isLibraryOpen && (
-        <BookList
-          books={libraryBooks}
-          loading={libraryLoading}
-          error={libraryError}
-          onRetry={() => fetchLibraryBooks({ force: true })}
-          onSelectBook={handleSelectBook}
-          onClose={handleCloseLibrary}
         />
       )}
     </div>
