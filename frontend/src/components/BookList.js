@@ -2,6 +2,14 @@
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+const BOOK_SHELF_TAB = "bookshelf";
+const ARCHIVE_TAB = "archive";
+const TAB_WIDTH = 152;
+const TAB_BAR_SIDE_PADDING = 18;
+const TAB_HEIGHT = 52;
+const TAB_BAR_OVERLAP = 8;
+const ACTIVE_TAB_BRIDGE_HEIGHT = 12;
+
 const BookCoverImage = ({ coverUrl, bookTitle, onSizeChange }) => {
   const [isVisible, setIsVisible] = useState(Boolean(coverUrl));
 
@@ -29,13 +37,14 @@ const BookCoverImage = ({ coverUrl, bookTitle, onSizeChange }) => {
   );
 };
 
-const BookList = ({ books, loading, error, onRetry, onSelectBook, onClose }) => {
+const BookList = ({ books, loading, error, onRetry, onSelectBook }) => {
   const buttonRefs = useRef({});
   const [maxButtonHeight, setMaxButtonHeight] = useState(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
+  const [activeTab, setActiveTab] = useState(BOOK_SHELF_TAB);
 
   useLayoutEffect(() => {
-    if (books.length === 0) {
+    if (activeTab !== BOOK_SHELF_TAB || books.length === 0) {
       setMaxButtonHeight(null);
       return;
     }
@@ -56,7 +65,7 @@ const BookList = ({ books, loading, error, onRetry, onSelectBook, onClose }) => 
     setMaxButtonHeight((currentHeight) =>
       currentHeight === tallestHeight ? currentHeight : tallestHeight,
     );
-  }, [books, layoutVersion]);
+  }, [activeTab, books, layoutVersion]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -73,141 +82,209 @@ const BookList = ({ books, loading, error, onRetry, onSelectBook, onClose }) => 
     setLayoutVersion((currentVersion) => currentVersion + 1);
   };
 
-  if (loading) {
-    return (
-      <div style={styles.overlay}>
-        <div style={styles.modal}>
-          <button
-            onClick={onClose}
-            style={styles.closeButton}
-            aria-label="Close Modal"
-          >
-            &#10005;
-          </button>
-          <p style={styles.message}>Loading books...</p>
-        </div>
-      </div>
-    );
-  }
+  const renderContent = () => {
+    if (loading) {
+      return <p style={styles.message}>Loading books...</p>;
+    }
 
-  if (error) {
-    return (
-      <div style={styles.overlay}>
-        <div style={styles.modal}>
-          <button
-            onClick={onClose}
-            style={styles.closeButton}
-            aria-label="Close Modal"
-          >
-            &#10005;
-          </button>
+    if (error) {
+      return (
+        <div style={styles.feedbackPanel}>
           <p style={styles.message}>Error fetching books. Please try again later.</p>
           <button type="button" style={styles.retryButton} onClick={onRetry}>
             Retry
           </button>
         </div>
-      </div>
+      );
+    }
+
+    if (activeTab === ARCHIVE_TAB) {
+      return <p style={{ ...styles.message, ...styles.archiveMessage }}>Archive is empty</p>;
+    }
+
+    return (
+      <ul style={styles.list}>
+        {books.map((book) => (
+          <li key={book.book_id} style={styles.listItem}>
+            <button
+              ref={(element) => {
+                if (element) {
+                  buttonRefs.current[book.book_id] = element;
+                  return;
+                }
+
+                delete buttonRefs.current[book.book_id];
+              }}
+              style={{
+                ...styles.bookButton,
+                height: maxButtonHeight ? `${maxButtonHeight}px` : "auto",
+              }}
+              onClick={() => {
+                onSelectBook(book.book_id);
+              }}
+            >
+              <span style={styles.bookTitle}>{book.book_title}</span>
+              <div style={styles.coverSlot}>
+                <BookCoverImage
+                  coverUrl={book.cover_url}
+                  bookTitle={book.book_title}
+                  onSizeChange={handleSizeChange}
+                />
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
     );
-  }
+  };
 
   return (
-    <div style={styles.overlay}>
-      <div style={styles.modal}>
-        {/* Close Button */}
+    <div style={styles.section}>
+      <div style={styles.tabBar} role="tablist" aria-label="Book list sections">
         <button
-          onClick={onClose}
-          style={styles.closeButton}
-          aria-label="Close Modal"
+          type="button"
+          role="tab"
+          aria-selected={activeTab === BOOK_SHELF_TAB}
+          onClick={() => setActiveTab(BOOK_SHELF_TAB)}
+          style={{
+            ...styles.tabButton,
+            ...(activeTab !== BOOK_SHELF_TAB ? styles.inactiveTabButton : {}),
+            ...(activeTab === BOOK_SHELF_TAB ? styles.activeTabButton : {}),
+          }}
         >
-          &#10005; {/* Unicode for "X" */}
+          <span style={styles.tabLabel}>Book Shelf</span>
         </button>
-
-        {/* Modal Title */}
-        <h2 style={styles.title}>My Book Shelf</h2>
-
-        {/* Book List */}
-        <ul style={styles.list}>
-          {books.map((book) => (
-            <li key={book.book_id} style={styles.listItem}>
-              <button
-                ref={(element) => {
-                  if (element) {
-                    buttonRefs.current[book.book_id] = element;
-                    return;
-                  }
-
-                  delete buttonRefs.current[book.book_id];
-                }}
-                style={{
-                  ...styles.bookButton,
-                  height: maxButtonHeight ? `${maxButtonHeight}px` : "auto",
-                }}
-                onClick={() => {
-                  onSelectBook(book.book_id);
-                  onClose(); // Close the BookList modal after selection
-                }}
-              >
-                <span style={styles.bookTitle}>{book.book_title}</span>
-                <div style={styles.coverSlot}>
-                  <BookCoverImage
-                    coverUrl={book.cover_url}
-                    bookTitle={book.book_title}
-                    onSizeChange={handleSizeChange}
-                  />
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === ARCHIVE_TAB}
+          onClick={() => setActiveTab(ARCHIVE_TAB)}
+          style={{
+            ...styles.tabButton,
+            ...styles.archiveTabButton,
+            ...styles.trailingTabButton,
+            ...(activeTab !== ARCHIVE_TAB ? styles.inactiveTabButton : {}),
+            ...(activeTab === ARCHIVE_TAB ? styles.activeTabButton : {}),
+          }}
+        >
+          <span style={styles.tabLabel}>Archive</span>
+        </button>
+        <div
+          aria-hidden="true"
+          data-testid="active-tab-bridge"
+          style={{
+            ...styles.activeTabBridge,
+            ...(activeTab === ARCHIVE_TAB ? styles.archiveActiveTabBridge : {}),
+            left:
+              activeTab === BOOK_SHELF_TAB
+                ? TAB_BAR_SIDE_PADDING
+                : TAB_BAR_SIDE_PADDING + TAB_WIDTH,
+          }}
+        />
+      </div>
+      <div
+        style={{
+          ...styles.content,
+          ...(activeTab === ARCHIVE_TAB ? styles.archiveContent : {}),
+        }}
+      >
+        {renderContent()}
       </div>
     </div>
   );
 };
 
 const styles = {
-  overlay: {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    width: "100vw",
-    height: "100vh",
-    backgroundColor: "rgba(0, 0, 0, 0.6)", // Semi-transparent background
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center", // Keep modal centered vertically
-    zIndex: 1000, // Ensure the modal is on top
-    padding: "20px",
-    // Removed overflowY from overlay
-  },
-  modal: {
-    position: "relative",
-    width: "90%",
+  section: {
+    width: "100%",
     maxWidth: "600px",
-    backgroundColor: "#CA054D",
-    borderRadius: "10px",
-    padding: "30px",
-    paddingBottom: "30px", // Extra padding at the bottom
-    boxShadow:"rgba(0, 0, 0, 0.25) 0px 54px 55px, rgba(0, 0, 0, 0.12) 0px -12px 30px, rgba(0, 0, 0, 0.12) 0px 4px 6px, rgba(0, 0, 0, 0.17) 0px 12px 13px, rgba(0, 0, 0, 0.09) 0px -3px 5px",
+    margin: "0 auto",
+    paddingTop: "18px",
+    boxSizing: "border-box",
+  },
+  tabBar: {
     display: "flex",
-    flexDirection: "column",
-    maxHeight: "90vh", // Re-added maxHeight to constrain modal height
-    overflowY: "auto", // Enable internal scrolling if content overflows
+    gap: "0",
+    alignItems: "flex-end",
+    padding: `0 ${TAB_BAR_SIDE_PADDING}px`,
+    marginBottom: `-${TAB_BAR_OVERLAP}px`,
+    position: "relative",
   },
-  closeButton: {
-    position: "absolute",
-    top: "15px",
-    right: "15px",
-    background: "transparent",
+  tabButton: {
+    flex: `0 0 ${TAB_WIDTH}px`,
+    minWidth: `${TAB_WIDTH}px`,
+    minHeight: `${TAB_HEIGHT}px`,
+    height: `${TAB_HEIGHT}px`,
+    padding: "0 18px",
     border: "none",
-    fontSize: "24px",
-    cursor: "pointer",
-    color: "#333",
-  },
-  title: {
-    marginBottom: "20px",
-    textAlign: "center",
-    fontSize: "24px",
+    borderTopLeftRadius: "20px",
+    borderTopRightRadius: "20px",
+    borderBottomLeftRadius: "0",
+    borderBottomRightRadius: "0",
+    backgroundColor: "#CA054D",
     color: "#FFCC00",
+    cursor: "pointer",
+    fontSize: "16px",
+    fontWeight: "600",
+    lineHeight: 1.1,
+    textAlign: "center",
+    position: "relative",
+    boxSizing: "border-box",
+    boxShadow: "none",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    transition: "box-shadow 0.2s ease, transform 0.2s ease, filter 0.2s ease",
+  },
+  tabLabel: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "100%",
+  },
+  trailingTabButton: {
+    marginLeft: "-10px",
+  },
+  archiveTabButton: {
+    backgroundColor: "#FFCC00",
+    color: "#CA054D",
+  },
+  inactiveTabButton: {
+    zIndex: 1,
+    filter: "brightness(0.96)",
+    boxShadow: "0 -2px 10px rgba(0, 0, 0, 0.08)",
+  },
+  activeTabButton: {
+    zIndex: 4,
+    boxShadow: "none",
+  },
+  activeTabBridge: {
+    position: "absolute",
+    bottom: `-${TAB_BAR_OVERLAP}px`,
+    width: `${TAB_WIDTH}px`,
+    height: `${ACTIVE_TAB_BRIDGE_HEIGHT}px`,
+    backgroundColor: "#CA054D",
+    zIndex: 3,
+    pointerEvents: "none",
+  },
+  archiveActiveTabBridge: {
+    backgroundColor: "#FFCC00",
+  },
+  content: {
+    minHeight: "48px",
+    backgroundColor: "#CA054D",
+    border: "none",
+    borderRadius: "18px",
+    padding: "26px 30px 30px",
+    position: "relative",
+    zIndex: 2,
+    boxSizing: "border-box",
+    boxShadow:
+      "0 18px 28px -16px rgba(0, 0, 0, 0.24), 0 10px 16px -12px rgba(0, 0, 0, 0.16)",
+  },
+  archiveContent: {
+    backgroundColor: "#FFCC00",
+    color: "#CA054D",
   },
   list: {
     display: 'grid',
@@ -272,7 +349,16 @@ const styles = {
   message: {
     textAlign: "center",
     fontSize: "18px",
-    color: "#555",
+    color: "#FFCC00",
+    margin: 0,
+  },
+  archiveMessage: {
+    color: "#CA054D",
+  },
+  feedbackPanel: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
   },
   retryButton: {
     alignSelf: "center",

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 
-const BookModal = ({ book, onClose, onBackToLibrary }) => {
+const BookModal = ({ book, onClose }) => {
   const [currentPage, setCurrentPage] = useState(0); // Zero-based index
 
   // Reset to first page whenever a new book is loaded
@@ -83,15 +83,6 @@ const BookModal = ({ book, onClose, onBackToLibrary }) => {
   return (
     <div style={styles.overlay}>
       <div style={styles.modal}>
-        {/* Back to Book Shelf Button */}
-        <button
-          onClick={onBackToLibrary}
-          style={styles.backButton}
-          aria-label="Back to Book Shelf"
-        >
-          &#8592; Book Shelf {/* Left arrow and text */}
-        </button>
-
         {/* Close Button */}
         <button
           onClick={handleClose}
@@ -261,17 +252,6 @@ const styles = {
     fontSize: "14px",
     color: "#555",
     marginTop: "10px",
-  },
-  backButton: {
-    position: "absolute",
-    top: "10px",
-    left: "10px",
-    background: "transparent",
-    border: "none",
-    fontSize: "18px",
-    cursor: "pointer",
-    opacity: 0.6,
-    transition: "opacity 0.2s",
   },
 };
 

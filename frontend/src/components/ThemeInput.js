@@ -7,7 +7,6 @@ const ThemeInput = ({
   setTheme,
   onSubmit,
   loading,
-  onOpenLibrary,
 }) => {
   const [sparks, setSparks] = useState([]);
   const sparkIdRef = useRef(0); // To generate unique IDs for sparks
@@ -219,13 +218,6 @@ const ThemeInput = ({
             {loading ? "Generating..." : "Generate Book"}
           </span>
         </button>
-        <button
-          type="button"
-          onClick={onOpenLibrary}
-          style={styles.libraryButton}
-        >
-          My Book Shelf
-        </button>
       </form>
     </div>
   );
@@ -263,19 +255,6 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
-    boxShadow: "rgba(0, 0, 0, 0.25) 1.95px 1.95px 2.6px",
-  },
-  libraryButton: {
-    padding: "10px 20px",
-    marginLeft: "10px",
-    backgroundColor: "#CA054D",
-    color: "#fff",
-    border: "none",
-    borderRadius: "4px",
-    fontSize: "16px",
-    cursor: "pointer",
-    transition: "background-color 0.2s",
-    marginBottom: "10px",
     boxShadow: "rgba(0, 0, 0, 0.25) 1.95px 1.95px 2.6px",
   },
 };
