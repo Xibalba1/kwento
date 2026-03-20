@@ -81,6 +81,7 @@ describe("BookList", () => {
         book_id: "book-2",
         book_title: "The Cover Book",
         cover_url: "https://example.com/cover.png",
+        render_cover_url: "blob:cached-cover",
       },
     ]);
 
@@ -101,11 +102,12 @@ describe("BookList", () => {
     });
   });
 
-  test("renders title-only when cover_url is missing", () => {
+  test("renders title-only when no cached shelf cover is available", () => {
     renderBookList([
       {
         book_id: "book-3",
         book_title: "Title Only",
+        cover_url: "https://example.com/remote-cover.png",
       },
     ]);
 
@@ -119,6 +121,7 @@ describe("BookList", () => {
         book_id: "book-4",
         book_title: "Broken Cover",
         cover_url: "https://example.com/broken-cover.png",
+        render_cover_url: "blob:broken-cover",
       },
     ]);
 

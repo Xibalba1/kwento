@@ -1,6 +1,6 @@
 // kwento/frontend/src/components/BookList.js
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const BOOK_SHELF_TAB = "bookshelf";
 const ARCHIVE_TAB = "archive";
@@ -37,8 +37,16 @@ const BookCoverImage = ({ coverUrl, bookTitle, onSizeChange }) => {
   );
 };
 
-const BookList = ({ books, loading, error, onRetry, onSelectBook }) => {
+const BookList = ({
+  books,
+  loading,
+  error,
+  onRetry,
+  onSelectBook,
+  onVisibleBooksChange,
+}) => {
   const buttonRefs = useRef({});
+  const itemRefs = useRef({});
   const [maxButtonHeight, setMaxButtonHeight] = useState(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
   const [activeTab, setActiveTab] = useState(BOOK_SHELF_TAB);
@@ -78,6 +86,59 @@ const BookList = ({ books, loading, error, onRetry, onSelectBook }) => {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof onVisibleBooksChange !== "function") {
+      return undefined;
+    }
+
+    if (activeTab !== BOOK_SHELF_TAB || books.length === 0) {
+      onVisibleBooksChange([]);
+      return undefined;
+    }
+
+    if (typeof window === "undefined" || typeof window.IntersectionObserver !== "function") {
+      onVisibleBooksChange(books.slice(0, 6).map((book) => book.book_id));
+      return undefined;
+    }
+
+    const visibleBookIds = new Set();
+    const observer = new window.IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const { bookId } = entry.target.dataset;
+          if (!bookId) {
+            return;
+          }
+
+          if (entry.isIntersecting) {
+            visibleBookIds.add(bookId);
+            return;
+          }
+
+          visibleBookIds.delete(bookId);
+        });
+
+        onVisibleBooksChange(Array.from(visibleBookIds));
+      },
+      {
+        root: null,
+        rootMargin: "240px 0px",
+        threshold: 0.01,
+      },
+    );
+
+    books.forEach((book) => {
+      const element = itemRefs.current[book.book_id];
+      if (element) {
+        observer.observe(element);
+      }
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeTab, books, onVisibleBooksChange]);
+
   const handleSizeChange = () => {
     setLayoutVersion((currentVersion) => currentVersion + 1);
   };
@@ -105,7 +166,19 @@ const BookList = ({ books, loading, error, onRetry, onSelectBook }) => {
     return (
       <ul style={styles.list}>
         {books.map((book) => (
-          <li key={book.book_id} style={styles.listItem}>
+          <li
+            key={book.book_id}
+            style={styles.listItem}
+            data-book-id={book.book_id}
+            ref={(element) => {
+              if (element) {
+                itemRefs.current[book.book_id] = element;
+                return;
+              }
+
+              delete itemRefs.current[book.book_id];
+            }}
+          >
             <button
               ref={(element) => {
                 if (element) {
@@ -126,7 +199,7 @@ const BookList = ({ books, loading, error, onRetry, onSelectBook }) => {
               <span style={styles.bookTitle}>{book.book_title}</span>
               <div style={styles.coverSlot}>
                 <BookCoverImage
-                  coverUrl={book.cover_url}
+                  coverUrl={book.render_cover_url}
                   bookTitle={book.book_title}
                   onSizeChange={handleSizeChange}
                 />
