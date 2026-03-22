@@ -51,6 +51,43 @@ const writeLocalStorageJson = (key, value) => {
   }
 };
 
+const resetDatabasePromise = () => {
+  dbPromise = null;
+};
+
+const isRecoverableDatabaseError = (error) => {
+  if (!error) {
+    return false;
+  }
+
+  const errorName = error.name ?? "";
+  const errorMessage = error.message ?? "";
+
+  return (
+    errorName === "InvalidStateError" ||
+    errorName === "AbortError" ||
+    errorMessage.includes("connection is closing") ||
+    errorMessage.includes("database connection is closing")
+  );
+};
+
+const attachDatabaseLifecycleHandlers = (db) => {
+  if (!db) {
+    return;
+  }
+
+  db.onversionchange = () => {
+    resetDatabasePromise();
+    db.close();
+  };
+
+  if ("onclose" in db) {
+    db.onclose = () => {
+      resetDatabasePromise();
+    };
+  }
+};
+
 const openDatabase = () => {
   if (!hasIndexedDb()) {
     return Promise.resolve(null);
@@ -81,33 +118,66 @@ const openDatabase = () => {
       }
     };
 
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      attachDatabaseLifecycleHandlers(db);
+      resolve(db);
+    };
+
+    request.onerror = () => {
+      resetDatabasePromise();
+      reject(request.error);
+    };
+
+    request.onblocked = () => {
+      resetDatabasePromise();
+    };
   });
 
   return dbPromise;
 };
 
-const runTransaction = async (storeName, mode, operation) => {
-  const db = await openDatabase();
-  if (!db) {
-    return null;
-  }
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(storeName, mode);
-    const store = transaction.objectStore(storeName);
-    const request = operation(store);
-
-    if (!request) {
-      transaction.oncomplete = () => resolve(null);
-      transaction.onerror = () => reject(transaction.error);
-      return;
+const runTransaction = async (storeName, mode, operation, retryCount = 1) => {
+  try {
+    const db = await openDatabase();
+    if (!db) {
+      return null;
     }
 
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+    return await new Promise((resolve, reject) => {
+      let request = null;
+      let resolved = false;
+      const transaction = db.transaction(storeName, mode);
+      const store = transaction.objectStore(storeName);
+
+      transaction.oncomplete = () => {
+        if (!resolved) {
+          resolve(request?.result ?? null);
+        }
+      };
+
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+
+      request = operation(store);
+      if (!request) {
+        return;
+      }
+
+      request.onsuccess = () => {
+        resolved = true;
+        resolve(request.result);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  } catch (error) {
+    if (retryCount > 0 && isRecoverableDatabaseError(error)) {
+      resetDatabasePromise();
+      return runTransaction(storeName, mode, operation, retryCount - 1);
+    }
+
+    throw error;
+  }
 };
 
 const putRecord = (storeName, value) =>
