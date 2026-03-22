@@ -1,9 +1,29 @@
 import { act } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import App from "./App";
+
+const mockCacheShelfCover = jest.fn();
+const mockEnforceCacheBudget = jest.fn();
+const mockGetCachedFullBook = jest.fn();
+const mockGetCachedShelfCover = jest.fn();
+const mockHasCachedShelfCover = jest.fn();
+const mockLoadShelfMetadataSync = jest.fn();
+const mockSaveFullBookPackage = jest.fn();
+const mockSaveShelfMetadata = jest.fn();
 
 jest.mock("./config", () => ({
   buildApiUrl: (path) => `http://localhost${path}`,
+}));
+
+jest.mock("./cache/libraryCache", () => ({
+  cacheShelfCover: (...args) => mockCacheShelfCover(...args),
+  enforceCacheBudget: (...args) => mockEnforceCacheBudget(...args),
+  getCachedFullBook: (...args) => mockGetCachedFullBook(...args),
+  getCachedShelfCover: (...args) => mockGetCachedShelfCover(...args),
+  hasCachedShelfCover: (...args) => mockHasCachedShelfCover(...args),
+  loadShelfMetadataSync: (...args) => mockLoadShelfMetadataSync(...args),
+  saveFullBookPackage: (...args) => mockSaveFullBookPackage(...args),
+  saveShelfMetadata: (...args) => mockSaveShelfMetadata(...args),
 }));
 
 const createDeferred = () => {
@@ -24,6 +44,17 @@ const createDeferred = () => {
 
 beforeEach(() => {
   window.localStorage.clear();
+  mockCacheShelfCover.mockResolvedValue(null);
+  mockEnforceCacheBudget.mockResolvedValue(undefined);
+  mockGetCachedFullBook.mockResolvedValue(null);
+  mockGetCachedShelfCover.mockResolvedValue(null);
+  mockHasCachedShelfCover.mockResolvedValue(false);
+  mockLoadShelfMetadataSync.mockImplementation(() => {
+    const raw = window.localStorage.getItem("kwento_shelf_metadata_v1");
+    return raw ? JSON.parse(raw) : null;
+  });
+  mockSaveFullBookPackage.mockResolvedValue(undefined);
+  mockSaveShelfMetadata.mockResolvedValue(undefined);
   global.fetch = jest.fn().mockResolvedValue({
     ok: true,
     json: async () => [],
@@ -142,4 +173,62 @@ test("keeps cached shelf metadata visible when the background refresh fails", as
 
   expect(screen.queryByText(/error fetching books/i)).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /offline shelf book/i })).toBeInTheDocument();
+});
+
+test("deduplicates repeated clicks while the same book is still opening", async () => {
+  const bookDetailsRequest = createDeferred();
+
+  global.fetch
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        {
+          book_id: "book-1",
+          book_title: "Repeat Click Book",
+          json_url: "https://example.com/book-1.json",
+        },
+      ],
+    })
+    .mockReturnValueOnce(bookDetailsRequest.promise)
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        pages: [{ page: 1, text: "Once upon a time" }],
+      }),
+    });
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  const bookButton = await screen.findByRole("button", { name: /repeat click book/i });
+
+  await act(async () => {
+    fireEvent.click(bookButton);
+    fireEvent.click(bookButton);
+    fireEvent.click(bookButton);
+  });
+
+  expect(mockGetCachedFullBook).toHaveBeenCalledTimes(1);
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+  expect(global.fetch).toHaveBeenNthCalledWith(2, "http://localhost/books/book-1/", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  await act(async () => {
+    bookDetailsRequest.resolve({
+      ok: true,
+      json: async () => ({
+        book_id: "book-1",
+        book_title: "Repeat Click Book",
+        json_url: "https://example.com/book-1.json",
+        images: [],
+      }),
+    });
+  });
+
+  await waitFor(() => {
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+  });
 });

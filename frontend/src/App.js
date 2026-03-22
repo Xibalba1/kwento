@@ -47,6 +47,7 @@ const App = () => {
   const coverQueueRef = useRef([]);
   const queuedCoverBookIdsRef = useRef(new Set());
   const pendingCoverBookIdsRef = useRef(new Set());
+  const inFlightBookSelectionRef = useRef(new Map());
 
   const updateCoverState = ({ bookId, status, sourceUrl }) => {
     setCoverStateByBookId((currentState) => {
@@ -442,30 +443,51 @@ const App = () => {
   };
 
   const handleSelectBook = async (bookId) => {
-    setExistingBookLoading(true);
-    setBook(null);
+    if (!bookId) {
+      return;
+    }
+
+    const existingSelection = inFlightBookSelectionRef.current.get(bookId);
+    if (existingSelection) {
+      return existingSelection;
+    }
+
+    const selectionPromise = (async () => {
+      setExistingBookLoading(true);
+      setBook(null);
+
+      try {
+        const cachedBook = await getCachedFullBook(bookId);
+        if (cachedBook) {
+          openBook(cachedBook);
+          return;
+        }
+
+        const completeBookData = await fetchAndBuildFullBook(bookId);
+        openBook(completeBookData);
+        upsertBookInLibrary(completeBookData);
+        void cacheFullBookInBackground(completeBookData);
+      } catch (error) {
+        console.error(
+          `App.js::handleSelectBook(): Failed to get book ID ${bookId} with error`,
+          error,
+        );
+        setBook(null);
+        alert("Error fetching the book. Please try again.");
+      } finally {
+        setExistingBookLoading(false);
+      }
+    })();
+
+    inFlightBookSelectionRef.current.set(bookId, selectionPromise);
 
     try {
-      const cachedBook = await getCachedFullBook(bookId);
-      if (cachedBook) {
-        openBook(cachedBook);
-        return;
-      }
-
-      const completeBookData = await fetchAndBuildFullBook(bookId);
-      openBook(completeBookData);
-      upsertBookInLibrary(completeBookData);
-      void cacheFullBookInBackground(completeBookData);
-    } catch (error) {
-      console.error(
-        `App.js::handleSelectBook(): Failed to get book ID ${bookId} with error`,
-        error,
-      );
-      setBook(null);
-      alert("Error fetching the book. Please try again.");
+      await selectionPromise;
     } finally {
-      setExistingBookLoading(false);
+      inFlightBookSelectionRef.current.delete(bookId);
     }
+
+    return selectionPromise;
   };
 
   return (
