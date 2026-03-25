@@ -44,6 +44,8 @@ const createDeferred = () => {
 
 beforeEach(() => {
   window.localStorage.clear();
+  global.URL.createObjectURL = jest.fn((value) => `blob:${String(value)}`);
+  global.URL.revokeObjectURL = jest.fn();
   mockCacheShelfCover.mockResolvedValue(null);
   mockEnforceCacheBudget.mockResolvedValue(undefined);
   mockGetCachedFullBook.mockResolvedValue(null);
@@ -230,5 +232,54 @@ test("deduplicates repeated clicks while the same book is still opening", async 
 
   await waitFor(() => {
     expect(global.fetch).toHaveBeenCalledTimes(3);
+  });
+});
+
+test("revokes cached book object URLs when the modal closes, not when it opens", async () => {
+  mockGetCachedFullBook.mockResolvedValue({
+    book_id: "book-2",
+    book_title: "Cached Modal Book",
+    __cachedObjectUrls: ["blob:book-2-cover", "blob:book-2-page-1"],
+    pages: [
+      {
+        page_number: 1,
+        content: {
+          text_content_of_this_page: "Cached page text",
+        },
+      },
+    ],
+    images: [
+      {
+        page: 1,
+        url: "blob:book-2-page-1",
+      },
+    ],
+  });
+
+  global.fetch.mockResolvedValueOnce({
+    ok: true,
+    json: async () => [
+      {
+        book_id: "book-2",
+        book_title: "Cached Modal Book",
+        json_url: "https://example.com/book-2.json",
+      },
+    ],
+  });
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  fireEvent.click(await screen.findByRole("button", { name: /cached modal book/i }));
+
+  expect(await screen.findByRole("button", { name: /close modal/i })).toBeInTheDocument();
+  expect(global.URL.revokeObjectURL).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: /close modal/i }));
+
+  await waitFor(() => {
+    expect(global.URL.revokeObjectURL).toHaveBeenCalledWith("blob:book-2-cover");
+    expect(global.URL.revokeObjectURL).toHaveBeenCalledWith("blob:book-2-page-1");
   });
 });

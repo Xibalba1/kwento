@@ -253,25 +253,36 @@ export const saveShelfMetadata = async (books) => {
 export const getCachedShelfCover = async (bookId, sourceUrl) => {
   const entry = await getRecord(ASSETS_STORE, shelfCoverKey(bookId));
   if (!entry || !entry.blob || isExpired(entry)) {
+    console.debug(`[libraryCache] shelf cover miss for ${bookId}`);
     return null;
   }
 
-  if (sourceUrl && entry.sourceUrl && entry.sourceUrl !== sourceUrl) {
-    return null;
+  if (sourceUrl && entry.sourceUrl !== sourceUrl) {
+    entry.sourceUrl = sourceUrl;
   }
 
   entry.lastUsedAt = now();
   await putRecord(ASSETS_STORE, entry);
+  console.debug(
+    `[libraryCache] shelf cover hit for ${bookId} via cached blob (${sourceUrl ? "remote-source-observed" : "no-source"})`,
+  );
   return toObjectUrl(entry.blob, entry.sourceUrl ?? sourceUrl);
 };
 
 export const hasCachedShelfCover = async (bookId, sourceUrl) => {
   const entry = await getRecord(ASSETS_STORE, shelfCoverKey(bookId));
   if (!entry || !entry.blob || isExpired(entry)) {
+    console.debug(`[libraryCache] hasCachedShelfCover miss for ${bookId}`);
     return false;
   }
 
-  return !sourceUrl || !entry.sourceUrl || entry.sourceUrl === sourceUrl;
+  if (sourceUrl && entry.sourceUrl !== sourceUrl) {
+    entry.sourceUrl = sourceUrl;
+    await putRecord(ASSETS_STORE, entry);
+  }
+
+  console.debug(`[libraryCache] hasCachedShelfCover hit for ${bookId}`);
+  return true;
 };
 
 export const cacheShelfCover = async ({ bookId, sourceUrl }) => {
@@ -285,9 +296,11 @@ export const cacheShelfCover = async ({ bookId, sourceUrl }) => {
   }
 
   const existing = await getRecord(ASSETS_STORE, shelfCoverKey(bookId));
-  if (existing?.blob && !isExpired(existing) && existing.sourceUrl === sourceUrl) {
+  if (existing?.blob && !isExpired(existing)) {
+    existing.sourceUrl = sourceUrl;
     existing.lastUsedAt = now();
     await putRecord(ASSETS_STORE, existing);
+    console.debug(`[libraryCache] shelf cover cache hit for ${bookId}; reusing cached blob`);
     return toObjectUrl(existing.blob, existing.sourceUrl);
   }
 
@@ -302,6 +315,7 @@ export const cacheShelfCover = async ({ bookId, sourceUrl }) => {
   });
 
   await putRecord(ASSETS_STORE, entry);
+  console.debug(`[libraryCache] shelf cover cache miss for ${bookId}; fetched remote asset`);
   return toObjectUrl(blob, sourceUrl);
 };
 

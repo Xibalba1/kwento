@@ -44,6 +44,8 @@ const App = () => {
   const cachedCoverUrlsRef = useRef({});
   const cachedBookObjectUrlsRef = useRef([]);
   const coverStateByBookIdRef = useRef({});
+  const previousCoverUrlsRef = useRef({});
+  const previousBookObjectUrlsRef = useRef([]);
   const coverQueueRef = useRef([]);
   const queuedCoverBookIdsRef = useRef(new Set());
   const pendingCoverBookIdsRef = useRef(new Set());
@@ -51,13 +53,6 @@ const App = () => {
 
   const updateCoverState = ({ bookId, status, sourceUrl }) => {
     setCoverStateByBookId((currentState) => {
-      const previousState = currentState[bookId] ?? {};
-      const previousUrl = previousState.url;
-
-      if (previousUrl && previousUrl !== sourceUrl && previousUrl.startsWith("blob:")) {
-        URL.revokeObjectURL(previousUrl);
-      }
-
       cachedCoverUrlsRef.current[bookId] = sourceUrl ?? null;
 
       const nextState = {
@@ -368,6 +363,52 @@ const App = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof URL?.revokeObjectURL !== "function") {
+      previousCoverUrlsRef.current = Object.fromEntries(
+        Object.entries(coverStateByBookId).map(([bookId, state]) => [bookId, state?.url ?? null]),
+      );
+      return;
+    }
+
+    const previousUrls = previousCoverUrlsRef.current;
+    const nextUrls = Object.fromEntries(
+      Object.entries(coverStateByBookId).map(([bookId, state]) => [bookId, state?.url ?? null]),
+    );
+    const activeUrls = new Set(Object.values(nextUrls).filter(Boolean));
+
+    Object.values(previousUrls).forEach((url) => {
+      if (typeof url === "string" && url.startsWith("blob:") && !activeUrls.has(url)) {
+        console.debug(`[App] Revoking stale shelf cover object URL: ${url}`);
+        URL.revokeObjectURL(url);
+      }
+    });
+
+    previousCoverUrlsRef.current = nextUrls;
+  }, [coverStateByBookId]);
+
+  useEffect(() => {
+    if (typeof URL?.revokeObjectURL !== "function") {
+      previousBookObjectUrlsRef.current = book?.__cachedObjectUrls ?? [];
+      cachedBookObjectUrlsRef.current = book?.__cachedObjectUrls ?? [];
+      return;
+    }
+
+    const previousUrls = previousBookObjectUrlsRef.current;
+    const nextUrls = book?.__cachedObjectUrls ?? [];
+    const activeUrls = new Set(nextUrls);
+
+    previousUrls.forEach((url) => {
+      if (typeof url === "string" && url.startsWith("blob:") && !activeUrls.has(url)) {
+        console.debug(`[App] Revoking stale book object URL: ${url}`);
+        URL.revokeObjectURL(url);
+      }
+    });
+
+    previousBookObjectUrlsRef.current = nextUrls;
+    cachedBookObjectUrlsRef.current = nextUrls;
+  }, [book]);
+
   const hydratedLibraryBooks = useMemo(
     () =>
       libraryBooks.map((bookEntry) => {
@@ -383,8 +424,6 @@ const App = () => {
   );
 
   const openBook = (nextBook) => {
-    releaseObjectUrls(cachedBookObjectUrlsRef.current);
-    cachedBookObjectUrlsRef.current = nextBook?.__cachedObjectUrls ?? [];
     setBook(nextBook);
     setIsModalOpen(true);
   };
@@ -436,8 +475,6 @@ const App = () => {
   };
 
   const handleCloseModal = () => {
-    releaseObjectUrls(cachedBookObjectUrlsRef.current);
-    cachedBookObjectUrlsRef.current = [];
     setIsModalOpen(false);
     setBook(null);
   };
