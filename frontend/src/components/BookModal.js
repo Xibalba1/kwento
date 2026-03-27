@@ -12,19 +12,20 @@ const BookModal = ({ book, onClose }) => {
   const [illustrationStatus, setIllustrationStatus] = useState("loading");
   const [illustrationDimensions, setIllustrationDimensions] = useState(null);
   const knownIllustrationDimensionsRef = useRef(new Map());
+  const pages = book?.pages ?? [];
+  const hasBook = pages.length > 0;
+  const totalPages = pages.length;
+  const page = hasBook ? pages[currentPage] : null;
+  const textContent = page?.content?.text_content_of_this_page || "No content available.";
+  const currentPageNumber = page?.page_number;
+  const imageObj = book?.images?.find((img) => img.page === currentPageNumber);
+  const illustrationUrl = imageObj?.url || "";
+  const illustrationKey = buildIllustrationKey(book?.book_id, currentPageNumber, illustrationUrl);
 
   // Reset to first page whenever a new book is loaded
   useEffect(() => {
     setCurrentPage(0);
   }, [book]);
-
-  // Early return if there's no book data
-  if (!book || !book.pages || book.pages.length === 0) {
-    return null;
-  }
-
-  const totalPages = book.pages.length;
-  const page = book.pages[currentPage];
 
   const handleNext = () => {
     if (currentPage < totalPages - 1) {
@@ -43,14 +44,6 @@ const BookModal = ({ book, onClose }) => {
     setCurrentPage(0); // Reset to first page when modal is closed
   };
 
-  // Safeguard: Ensure page fields exist
-  const textContent =
-    page.content?.text_content_of_this_page || "No content available.";
-  const currentPageNumber = page.page_number;
-  const imageObj = book.images.find((img) => img.page === currentPageNumber);
-  const illustrationUrl = imageObj?.url || "";
-  const illustrationKey = buildIllustrationKey(book.book_id, currentPageNumber, illustrationUrl);
-
   useEffect(() => {
     const knownDimensions = knownIllustrationDimensionsRef.current.get(illustrationKey) ?? null;
     setIllustrationDimensions(knownDimensions);
@@ -64,6 +57,11 @@ const BookModal = ({ book, onClose }) => {
     setIllustrationStatus("loading");
     console.debug(`[BookModal] Starting illustration transition for page ${currentPageNumber}`);
   }, [currentPageNumber, illustrationKey, illustrationUrl]);
+
+  // Early return if there's no book data
+  if (!hasBook) {
+    return null;
+  }
 
   const illustrationFrameStyle = illustrationDimensions
     ? {
