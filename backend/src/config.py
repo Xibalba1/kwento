@@ -146,7 +146,7 @@ class Settings(BaseSettings):
     google_text_model: str = "gemini-3.1-flash-lite-preview"
     google_image_model: str = "gemini-3.1-flash-image-preview"
     google_image_aspect_ratio: str = "1:1"
-    google_image_size: str = "2K"
+    google_image_size: str = "512px"
     image_prompt_observability_mode: Literal["off", "metadata", "full"] = "off"
     image_prompt_log_max_chars: int = 12000
 

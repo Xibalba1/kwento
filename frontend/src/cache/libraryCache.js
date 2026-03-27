@@ -1,3 +1,5 @@
+import { logImageEvent } from "../debug/imageDebug";
+
 const CACHE_VERSION = 1;
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DB_NAME = "kwento-cache";
@@ -90,6 +92,7 @@ const attachDatabaseLifecycleHandlers = (db) => {
 
 const openDatabase = () => {
   if (!hasIndexedDb()) {
+    logImageEvent("cache:indexeddb_unavailable", {});
     return Promise.resolve(null);
   }
 
@@ -102,6 +105,10 @@ const openDatabase = () => {
 
     request.onupgradeneeded = () => {
       const db = request.result;
+      logImageEvent("cache:db_upgrade", {
+        db_name: DB_NAME,
+        db_version: DB_VERSION,
+      });
 
       if (!db.objectStoreNames.contains(ASSETS_STORE)) {
         const assetsStore = db.createObjectStore(ASSETS_STORE, { keyPath: "id" });
@@ -121,16 +128,29 @@ const openDatabase = () => {
     request.onsuccess = () => {
       const db = request.result;
       attachDatabaseLifecycleHandlers(db);
+      logImageEvent("cache:db_open_success", {
+        db_name: DB_NAME,
+        db_version: DB_VERSION,
+      });
       resolve(db);
     };
 
     request.onerror = () => {
       resetDatabasePromise();
+      logImageEvent("cache:db_open_error", {
+        db_name: DB_NAME,
+        db_version: DB_VERSION,
+        error: request.error,
+      });
       reject(request.error);
     };
 
     request.onblocked = () => {
       resetDatabasePromise();
+      logImageEvent("cache:db_open_blocked", {
+        db_name: DB_NAME,
+        db_version: DB_VERSION,
+      });
     };
   });
 
@@ -141,6 +161,10 @@ const runTransaction = async (storeName, mode, operation, retryCount = 1) => {
   try {
     const db = await openDatabase();
     if (!db) {
+      logImageEvent("cache:transaction_skipped", {
+        store_name: storeName,
+        mode,
+      });
       return null;
     }
 
@@ -171,6 +195,12 @@ const runTransaction = async (storeName, mode, operation, retryCount = 1) => {
       request.onerror = () => reject(request.error);
     });
   } catch (error) {
+    logImageEvent("cache:transaction_error", {
+      store_name: storeName,
+      mode,
+      retry_count: retryCount,
+      error,
+    });
     if (retryCount > 0 && isRecoverableDatabaseError(error)) {
       resetDatabasePromise();
       return runTransaction(storeName, mode, operation, retryCount - 1);
@@ -193,12 +223,26 @@ const getAllRecords = (storeName) =>
   runTransaction(storeName, "readonly", (store) => store.getAll());
 
 const safeFetchBlob = async (url) => {
+  const startedAt = now();
   const response = await fetch(url);
   if (!response.ok) {
+    logImageEvent("cache:fetch_error", {
+      source_url: url,
+      status: response.status,
+      duration_ms: now() - startedAt,
+    });
     throw new Error(`Failed to fetch asset. status=${response.status}`);
   }
 
-  return response.blob();
+  const blob = await response.blob();
+  logImageEvent("cache:fetch_success", {
+    source_url: url,
+    status: response.status,
+    duration_ms: now() - startedAt,
+    blob_size: blob.size,
+    content_type: blob.type || response.headers?.get?.("content-type") || null,
+  });
+  return blob;
 };
 
 const shelfCoverKey = (bookId) => `cover:${bookId}`;
@@ -207,12 +251,24 @@ const fullBookKey = (bookId) => `book:${bookId}`;
 const isExpired = (entry) => Boolean(entry?.expiresAt && entry.expiresAt < now());
 
 const approximateBlobSize = (blob) => blob?.size ?? 0;
-const toObjectUrl = (blob, fallbackUrl = null) => {
+const toObjectUrl = (blob, fallbackUrl = null, debugContext = {}) => {
   if (typeof URL?.createObjectURL !== "function") {
+    logImageEvent("cache:object_url_fallback", {
+      ...debugContext,
+      fallback_url: fallbackUrl,
+    });
     return fallbackUrl;
   }
 
-  return URL.createObjectURL(blob);
+  const objectUrl = URL.createObjectURL(blob);
+  logImageEvent("cache:object_url_created", {
+    ...debugContext,
+    object_url: objectUrl,
+    blob_size: blob?.size ?? null,
+    blob_type: blob?.type ?? null,
+    fallback_url: fallbackUrl,
+  });
+  return objectUrl;
 };
 
 const estimateRecordSize = (record) => {
@@ -253,42 +309,101 @@ export const saveShelfMetadata = async (books) => {
 export const getCachedShelfCover = async (bookId, sourceUrl) => {
   const entry = await getRecord(ASSETS_STORE, shelfCoverKey(bookId));
   if (!entry || !entry.blob || isExpired(entry)) {
+    logImageEvent("cover:get_cached_miss", {
+      book_id: bookId,
+      source_url: sourceUrl,
+      cache_entry_present: Boolean(entry),
+      expired: isExpired(entry),
+    });
+    console.debug(`[libraryCache] shelf cover miss for ${bookId}`);
     return null;
   }
 
-  if (sourceUrl && entry.sourceUrl && entry.sourceUrl !== sourceUrl) {
-    return null;
+  if (sourceUrl && entry.sourceUrl !== sourceUrl) {
+    entry.sourceUrl = sourceUrl;
   }
 
   entry.lastUsedAt = now();
   await putRecord(ASSETS_STORE, entry);
-  return toObjectUrl(entry.blob, entry.sourceUrl ?? sourceUrl);
+  logImageEvent("cover:get_cached_hit", {
+    book_id: bookId,
+    source_url: sourceUrl,
+    cached_source_url: entry.sourceUrl ?? null,
+    blob_size: approximateBlobSize(entry.blob),
+  });
+  console.debug(
+    `[libraryCache] shelf cover hit for ${bookId} via cached blob (${sourceUrl ? "remote-source-observed" : "no-source"})`,
+  );
+  return toObjectUrl(entry.blob, entry.sourceUrl ?? sourceUrl, {
+    book_id: bookId,
+    source_url: entry.sourceUrl ?? sourceUrl,
+    origin: "getCachedShelfCover",
+  });
 };
 
 export const hasCachedShelfCover = async (bookId, sourceUrl) => {
   const entry = await getRecord(ASSETS_STORE, shelfCoverKey(bookId));
   if (!entry || !entry.blob || isExpired(entry)) {
+    logImageEvent("cover:has_cached_miss", {
+      book_id: bookId,
+      source_url: sourceUrl,
+      cache_entry_present: Boolean(entry),
+      expired: isExpired(entry),
+    });
+    console.debug(`[libraryCache] hasCachedShelfCover miss for ${bookId}`);
     return false;
   }
 
-  return !sourceUrl || !entry.sourceUrl || entry.sourceUrl === sourceUrl;
+  if (sourceUrl && entry.sourceUrl !== sourceUrl) {
+    entry.sourceUrl = sourceUrl;
+    await putRecord(ASSETS_STORE, entry);
+  }
+
+  logImageEvent("cover:has_cached_hit", {
+    book_id: bookId,
+    source_url: sourceUrl,
+    cached_source_url: entry.sourceUrl ?? null,
+    blob_size: approximateBlobSize(entry.blob),
+  });
+  console.debug(`[libraryCache] hasCachedShelfCover hit for ${bookId}`);
+  return true;
 };
 
 export const cacheShelfCover = async ({ bookId, sourceUrl }) => {
   if (!bookId || !sourceUrl) {
+    logImageEvent("cover:cache_skip", {
+      book_id: bookId,
+      source_url: sourceUrl,
+    });
     return null;
   }
 
   const db = await openDatabase();
   if (!db) {
+    logImageEvent("cover:cache_bypass", {
+      book_id: bookId,
+      source_url: sourceUrl,
+      reason: "no_indexeddb",
+    });
     return sourceUrl;
   }
 
   const existing = await getRecord(ASSETS_STORE, shelfCoverKey(bookId));
-  if (existing?.blob && !isExpired(existing) && existing.sourceUrl === sourceUrl) {
+  if (existing?.blob && !isExpired(existing)) {
+    existing.sourceUrl = sourceUrl;
     existing.lastUsedAt = now();
     await putRecord(ASSETS_STORE, existing);
-    return toObjectUrl(existing.blob, existing.sourceUrl);
+    logImageEvent("cover:cache_hit_reuse", {
+      book_id: bookId,
+      source_url: sourceUrl,
+      blob_size: approximateBlobSize(existing.blob),
+    });
+    console.debug(`[libraryCache] shelf cover cache hit for ${bookId}; reusing cached blob`);
+    return toObjectUrl(existing.blob, existing.sourceUrl, {
+      book_id: bookId,
+      source_url: existing.sourceUrl,
+      origin: "cacheShelfCover:existing",
+    });
   }
 
   const blob = await safeFetchBlob(sourceUrl);
@@ -302,7 +417,18 @@ export const cacheShelfCover = async ({ bookId, sourceUrl }) => {
   });
 
   await putRecord(ASSETS_STORE, entry);
-  return toObjectUrl(blob, sourceUrl);
+  logImageEvent("cover:cache_store", {
+    book_id: bookId,
+    source_url: sourceUrl,
+    blob_size: approximateBlobSize(blob),
+    expires_at: entry.expiresAt,
+  });
+  console.debug(`[libraryCache] shelf cover cache miss for ${bookId}; fetched remote asset`);
+  return toObjectUrl(blob, sourceUrl, {
+    book_id: bookId,
+    source_url: sourceUrl,
+    origin: "cacheShelfCover:fetched",
+  });
 };
 
 const buildFullBookAssetEntries = async (book) => {

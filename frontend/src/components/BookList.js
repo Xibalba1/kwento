@@ -1,6 +1,7 @@
 // kwento/frontend/src/components/BookList.js
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { getImageDebugPageContext, logImageEvent } from "../debug/imageDebug";
 
 const BOOK_SHELF_TAB = "bookshelf";
 const ARCHIVE_TAB = "archive";
@@ -10,12 +11,54 @@ const TAB_HEIGHT = 52;
 const TAB_BAR_OVERLAP = 8;
 const ACTIVE_TAB_BRIDGE_HEIGHT = 12;
 
-const BookCoverImage = ({ coverUrl, bookTitle, onSizeChange }) => {
+const BookCoverImage = ({ bookId, coverUrl, cacheStatus, bookTitle, onSizeChange }) => {
   const [isVisible, setIsVisible] = useState(Boolean(coverUrl));
+  const imageRef = useRef(null);
+
+  const buildImageSnapshot = () => {
+    const image = imageRef.current;
+    if (!image) {
+      return null;
+    }
+
+    const rect = image.getBoundingClientRect();
+    return {
+      current_src: image.currentSrc || image.src || null,
+      complete: image.complete,
+      natural_width: image.naturalWidth,
+      natural_height: image.naturalHeight,
+      client_width: image.clientWidth,
+      client_height: image.clientHeight,
+      rect_width: Math.round(rect.width),
+      rect_height: Math.round(rect.height),
+    };
+  };
 
   useEffect(() => {
     setIsVisible(Boolean(coverUrl));
-  }, [coverUrl]);
+    logImageEvent("img:prop_change", {
+      book_id: bookId,
+      render_cover_url: coverUrl,
+      cover_cache_status: cacheStatus,
+      is_visible: Boolean(coverUrl),
+    });
+  }, [bookId, cacheStatus, coverUrl]);
+
+  useEffect(() => {
+    logImageEvent("img:component_mount", {
+      book_id: bookId,
+      render_cover_url: coverUrl,
+      cover_cache_status: cacheStatus,
+    });
+
+    return () => {
+      logImageEvent("img:component_unmount", {
+        book_id: bookId,
+        render_cover_url: coverUrl,
+        cover_cache_status: cacheStatus,
+      });
+    };
+  }, [bookId, cacheStatus, coverUrl]);
 
   if (!coverUrl || !isVisible) {
     return null;
@@ -24,11 +67,27 @@ const BookCoverImage = ({ coverUrl, bookTitle, onSizeChange }) => {
   return (
     <div style={styles.coverFrame}>
       <img
+        ref={imageRef}
         src={coverUrl}
         alt={`Cover for ${bookTitle}`}
         style={styles.coverImage}
-        onLoad={onSizeChange}
+        onLoad={() => {
+          logImageEvent("img:load", {
+            book_id: bookId,
+            render_cover_url: coverUrl,
+            cover_cache_status: cacheStatus,
+            snapshot: buildImageSnapshot(),
+          });
+          onSizeChange();
+        }}
         onError={() => {
+          logImageEvent("img:error", {
+            book_id: bookId,
+            render_cover_url: coverUrl,
+            cover_cache_status: cacheStatus,
+            snapshot: buildImageSnapshot(),
+            page: getImageDebugPageContext(),
+          });
           setIsVisible(false);
           onSizeChange();
         }}
@@ -112,10 +171,18 @@ const BookList = ({
 
           if (entry.isIntersecting) {
             visibleBookIds.add(bookId);
+            logImageEvent("viewport:enter", {
+              book_id: bookId,
+              intersection_ratio: entry.intersectionRatio,
+            });
             return;
           }
 
           visibleBookIds.delete(bookId);
+          logImageEvent("viewport:exit", {
+            book_id: bookId,
+            intersection_ratio: entry.intersectionRatio,
+          });
         });
 
         onVisibleBooksChange(Array.from(visibleBookIds));
@@ -199,7 +266,9 @@ const BookList = ({
               <span style={styles.bookTitle}>{book.book_title}</span>
               <div style={styles.coverSlot}>
                 <BookCoverImage
+                  bookId={book.book_id}
                   coverUrl={book.render_cover_url}
+                  cacheStatus={book.cover_cache_status}
                   bookTitle={book.book_title}
                   onSizeChange={handleSizeChange}
                 />

@@ -13,6 +13,7 @@ import {
   saveFullBookPackage,
   saveShelfMetadata,
 } from "./cache/libraryCache";
+import { getImageDebugPageContext, logImageEvent } from "./debug/imageDebug";
 
 const COVER_DOWNLOAD_CONCURRENCY = 3;
 const INITIAL_VISIBLE_BOOK_COUNT = 6;
@@ -44,6 +45,8 @@ const App = () => {
   const cachedCoverUrlsRef = useRef({});
   const cachedBookObjectUrlsRef = useRef([]);
   const coverStateByBookIdRef = useRef({});
+  const previousCoverUrlsRef = useRef({});
+  const previousBookObjectUrlsRef = useRef([]);
   const coverQueueRef = useRef([]);
   const queuedCoverBookIdsRef = useRef(new Set());
   const pendingCoverBookIdsRef = useRef(new Set());
@@ -51,14 +54,8 @@ const App = () => {
 
   const updateCoverState = ({ bookId, status, sourceUrl }) => {
     setCoverStateByBookId((currentState) => {
-      const previousState = currentState[bookId] ?? {};
-      const previousUrl = previousState.url;
-
-      if (previousUrl && previousUrl !== sourceUrl && previousUrl.startsWith("blob:")) {
-        URL.revokeObjectURL(previousUrl);
-      }
-
       cachedCoverUrlsRef.current[bookId] = sourceUrl ?? null;
+      const previousState = currentState[bookId] ?? null;
 
       const nextState = {
         ...currentState,
@@ -68,6 +65,12 @@ const App = () => {
         },
       };
 
+      logImageEvent("cover:state_updated", {
+        book_id: bookId,
+        previous_status: previousState?.status ?? null,
+        next_status: status,
+        render_cover_url: sourceUrl ?? null,
+      });
       coverStateByBookIdRef.current = nextState;
       return nextState;
     });
@@ -75,6 +78,7 @@ const App = () => {
 
   const markCoverStatus = (bookId, status) => {
     setCoverStateByBookId((currentState) => {
+      const previousState = currentState[bookId] ?? null;
       const nextState = {
         ...currentState,
         [bookId]: {
@@ -83,6 +87,12 @@ const App = () => {
         },
       };
 
+      logImageEvent("cover:status_marked", {
+        book_id: bookId,
+        previous_status: previousState?.status ?? null,
+        next_status: status,
+        render_cover_url: previousState?.url ?? null,
+      });
       coverStateByBookIdRef.current = nextState;
       return nextState;
     });
@@ -132,6 +142,9 @@ const App = () => {
     }
 
     const fetchPromise = (async () => {
+      logImageEvent("shelf:fetch_start", {
+        force,
+      });
       setLibraryLoading(true);
       setLibraryError(false);
 
@@ -148,9 +161,15 @@ const App = () => {
         const books = await response.json();
         const normalizedBooks = Array.isArray(books) ? books : [];
         setLibraryBooks(normalizedBooks);
+        logImageEvent("shelf:fetch_success", {
+          count: normalizedBooks.length,
+        });
         await saveShelfMetadata(normalizedBooks);
       } catch (error) {
         console.error("Failed to prefetch library books:", error);
+        logImageEvent("shelf:fetch_error", {
+          error,
+        });
         setLibraryError(true);
       } finally {
         setLibraryLoading(false);
@@ -194,6 +213,10 @@ const App = () => {
 
   const pumpCoverQueue = async () => {
     if (pendingCoverBookIdsRef.current.size >= COVER_DOWNLOAD_CONCURRENCY) {
+      logImageEvent("cover:queue_backpressure", {
+        pending_count: pendingCoverBookIdsRef.current.size,
+        queued_count: coverQueueRef.current.length,
+      });
       return;
     }
 
@@ -208,6 +231,12 @@ const App = () => {
 
       pendingCoverBookIdsRef.current.add(nextTask.bookId);
       queuedCoverBookIdsRef.current.delete(nextTask.bookId);
+      logImageEvent("cover:queue_dequeued", {
+        book_id: nextTask.bookId,
+        source_url: nextTask.coverUrl,
+        pending_count: pendingCoverBookIdsRef.current.size,
+        queued_count: coverQueueRef.current.length,
+      });
       markCoverStatus(nextTask.bookId, "pending");
 
       cacheShelfCover({
@@ -215,6 +244,11 @@ const App = () => {
         sourceUrl: nextTask.coverUrl,
       })
         .then(async (objectUrl) => {
+          logImageEvent("cover:queue_resolved", {
+            book_id: nextTask.bookId,
+            source_url: nextTask.coverUrl,
+            render_cover_url: objectUrl,
+          });
           updateCoverState({
             bookId: nextTask.bookId,
             status: "cached",
@@ -224,22 +258,62 @@ const App = () => {
         })
         .catch((error) => {
           console.warn(`Failed to cache cover for ${nextTask.bookId}:`, error);
+          logImageEvent("cover:queue_failed", {
+            book_id: nextTask.bookId,
+            source_url: nextTask.coverUrl,
+            error,
+          });
           markCoverStatus(nextTask.bookId, "failed");
         })
         .finally(() => {
           pendingCoverBookIdsRef.current.delete(nextTask.bookId);
+          logImageEvent("cover:queue_finalized", {
+            book_id: nextTask.bookId,
+            pending_count: pendingCoverBookIdsRef.current.size,
+            queued_count: coverQueueRef.current.length,
+          });
           void pumpCoverQueue();
         });
     }
   };
 
   useEffect(() => {
+    logImageEvent("app:mount", getImageDebugPageContext());
     const cachedMetadata = loadShelfMetadataSync();
     if (cachedMetadata?.books?.length) {
       setLibraryBooks(cachedMetadata.books);
+      logImageEvent("shelf:metadata_hydrated", {
+        count: cachedMetadata.books.length,
+      });
     }
 
     fetchLibraryBooks();
+  }, []);
+
+  useEffect(() => {
+    const logLifecycleEvent = (eventName) => {
+      logImageEvent(eventName, getImageDebugPageContext());
+    };
+
+    const handleVisibilityChange = () => {
+      logLifecycleEvent("app:visibility_change");
+    };
+    const handlePageShow = () => {
+      logLifecycleEvent("app:pageshow");
+    };
+    const handlePageHide = () => {
+      logLifecycleEvent("app:pagehide");
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
   }, []);
 
   useEffect(() => {
@@ -256,6 +330,10 @@ const App = () => {
         ? visibleBookIds
         : libraryBooks.slice(0, INITIAL_VISIBLE_BOOK_COUNT).map((entry) => entry.book_id),
     );
+    logImageEvent("shelf:visible_set_computed", {
+      visible_book_ids: Array.from(visibleSet),
+      library_count: libraryBooks.length,
+    });
 
     const visibleBooks = [];
     const nearViewportBooks = [];
@@ -288,6 +366,10 @@ const App = () => {
     });
 
     const hydrateAndQueueCovers = async () => {
+      logImageEvent("cover:hydrate_start", {
+        visible_book_ids: visibleBooks.map((bookEntry) => bookEntry.book_id),
+        near_viewport_book_ids: nearViewportBooks.map((bookEntry) => bookEntry.book_id),
+      });
       await Promise.all(
         visibleBooks.map(async (bookEntry) => {
           if (!bookEntry?.book_id || !bookEntry.cover_url) {
@@ -295,12 +377,20 @@ const App = () => {
           }
 
           if (coverStateByBookIdRef.current[bookEntry.book_id]?.status === "cached") {
+            logImageEvent("cover:hydrate_skip_cached", {
+              book_id: bookEntry.book_id,
+            });
             return;
           }
 
           try {
             const cachedCoverUrl = await getCachedShelfCover(bookEntry.book_id, bookEntry.cover_url);
             if (cachedCoverUrl) {
+              logImageEvent("cover:hydrate_cache_hit", {
+                book_id: bookEntry.book_id,
+                source_url: bookEntry.cover_url,
+                render_cover_url: cachedCoverUrl,
+              });
               updateCoverState({
                 bookId: bookEntry.book_id,
                 status: "cached",
@@ -309,9 +399,18 @@ const App = () => {
               return;
             }
 
+            logImageEvent("cover:hydrate_cache_miss", {
+              book_id: bookEntry.book_id,
+              source_url: bookEntry.cover_url,
+            });
             markCoverStatus(bookEntry.book_id, "uncached");
           } catch (error) {
             console.warn(`Failed to hydrate cached cover for ${bookEntry.book_id}:`, error);
+            logImageEvent("cover:hydrate_failed", {
+              book_id: bookEntry.book_id,
+              source_url: bookEntry.cover_url,
+              error,
+            });
             markCoverStatus(bookEntry.book_id, "failed");
           }
         }),
@@ -334,6 +433,10 @@ const App = () => {
 
         const cached = await hasCachedShelfCover(bookEntry.book_id, bookEntry.cover_url);
         if (cached) {
+          logImageEvent("cover:queue_skip_has_cached", {
+            book_id: bookEntry.book_id,
+            source_url: bookEntry.cover_url,
+          });
           continue;
         }
 
@@ -345,10 +448,18 @@ const App = () => {
       }
 
       if (candidates.length === 0) {
+        logImageEvent("cover:queue_noop", {});
         return;
       }
 
       coverQueueRef.current = [...candidates, ...coverQueueRef.current];
+      logImageEvent("cover:queue_enqueued", {
+        candidates: candidates.map((candidate) => ({
+          book_id: candidate.bookId,
+          source_url: candidate.coverUrl,
+        })),
+        queued_count: coverQueueRef.current.length,
+      });
       void pumpCoverQueue();
     };
 
@@ -368,6 +479,60 @@ const App = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof URL?.revokeObjectURL !== "function") {
+      previousCoverUrlsRef.current = Object.fromEntries(
+        Object.entries(coverStateByBookId).map(([bookId, state]) => [bookId, state?.url ?? null]),
+      );
+      return;
+    }
+
+    const previousUrls = previousCoverUrlsRef.current;
+    const nextUrls = Object.fromEntries(
+      Object.entries(coverStateByBookId).map(([bookId, state]) => [bookId, state?.url ?? null]),
+    );
+    const activeUrls = new Set(Object.values(nextUrls).filter(Boolean));
+
+    Object.values(previousUrls).forEach((url) => {
+      if (typeof url === "string" && url.startsWith("blob:") && !activeUrls.has(url)) {
+        console.debug(`[App] Revoking stale shelf cover object URL: ${url}`);
+        logImageEvent("cover:object_url_revoked", {
+          object_url: url,
+          reason: "stale_shelf_cover",
+        });
+        URL.revokeObjectURL(url);
+      }
+    });
+
+    previousCoverUrlsRef.current = nextUrls;
+  }, [coverStateByBookId]);
+
+  useEffect(() => {
+    if (typeof URL?.revokeObjectURL !== "function") {
+      previousBookObjectUrlsRef.current = book?.__cachedObjectUrls ?? [];
+      cachedBookObjectUrlsRef.current = book?.__cachedObjectUrls ?? [];
+      return;
+    }
+
+    const previousUrls = previousBookObjectUrlsRef.current;
+    const nextUrls = book?.__cachedObjectUrls ?? [];
+    const activeUrls = new Set(nextUrls);
+
+    previousUrls.forEach((url) => {
+      if (typeof url === "string" && url.startsWith("blob:") && !activeUrls.has(url)) {
+        console.debug(`[App] Revoking stale book object URL: ${url}`);
+        logImageEvent("book:object_url_revoked", {
+          object_url: url,
+          reason: "stale_book_asset",
+        });
+        URL.revokeObjectURL(url);
+      }
+    });
+
+    previousBookObjectUrlsRef.current = nextUrls;
+    cachedBookObjectUrlsRef.current = nextUrls;
+  }, [book]);
+
   const hydratedLibraryBooks = useMemo(
     () =>
       libraryBooks.map((bookEntry) => {
@@ -383,8 +548,6 @@ const App = () => {
   );
 
   const openBook = (nextBook) => {
-    releaseObjectUrls(cachedBookObjectUrlsRef.current);
-    cachedBookObjectUrlsRef.current = nextBook?.__cachedObjectUrls ?? [];
     setBook(nextBook);
     setIsModalOpen(true);
   };
@@ -436,8 +599,6 @@ const App = () => {
   };
 
   const handleCloseModal = () => {
-    releaseObjectUrls(cachedBookObjectUrlsRef.current);
-    cachedBookObjectUrlsRef.current = [];
     setIsModalOpen(false);
     setBook(null);
   };

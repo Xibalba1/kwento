@@ -1,34 +1,25 @@
 // kwento/frontend/src/components/BookModal.js
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
+
+const DEFAULT_ILLUSTRATION_ASPECT_RATIO = "4 / 3";
+
+const buildIllustrationKey = (bookId, pageNumber, illustrationUrl) =>
+  `${bookId ?? "unknown-book"}:${pageNumber ?? "unknown-page"}:${illustrationUrl ?? "missing"}`;
 
 const BookModal = ({ book, onClose }) => {
   const [currentPage, setCurrentPage] = useState(0); // Zero-based index
+  const [illustrationStatus, setIllustrationStatus] = useState("loading");
+  const [illustrationDimensions, setIllustrationDimensions] = useState(null);
+  const knownIllustrationDimensionsRef = useRef(new Map());
 
   // Reset to first page whenever a new book is loaded
   useEffect(() => {
     setCurrentPage(0);
-    console.log("BookModal.js: New book loaded. Resetting to first page.");
   }, [book]);
-
-  // Log current page data for debugging
-  useEffect(() => {
-    if (book && book.pages && book.pages[currentPage]) {
-      const page = book.pages[currentPage];
-      console.log(
-        `BookModal.js::useEffect(): Current Page (${currentPage + 1}):`,
-        page
-      );
-    } else {
-      console.log(
-        `BookModal.js::useEffect(): No page data available for current page index: ${currentPage}`
-      );
-    }
-  }, [currentPage, book]);
 
   // Early return if there's no book data
   if (!book || !book.pages || book.pages.length === 0) {
-    console.warn("No book data available to display.");
     return null;
   }
 
@@ -38,27 +29,18 @@ const BookModal = ({ book, onClose }) => {
   const handleNext = () => {
     if (currentPage < totalPages - 1) {
       setCurrentPage((prev) => prev + 1);
-      console.log(
-        `BookModal.js::handleNext(): Navigated to next page: ${currentPage + 2}`
-      );
     }
   };
 
   const handlePrev = () => {
     if (currentPage > 0) {
       setCurrentPage((prev) => prev - 1);
-      console.log(
-        `BookModal.js::handlePrev(): Navigated to previous page: ${currentPage}`
-      );
     }
   };
 
   const handleClose = () => {
     onClose();
     setCurrentPage(0); // Reset to first page when modal is closed
-    console.log(
-      "BookModal.js::handleClose(): Book modal closed. Resetting current page."
-    );
   };
 
   // Safeguard: Ensure page fields exist
@@ -67,18 +49,32 @@ const BookModal = ({ book, onClose }) => {
   const currentPageNumber = page.page_number;
   const imageObj = book.images.find((img) => img.page === currentPageNumber);
   const illustrationUrl = imageObj?.url || "";
+  const illustrationKey = buildIllustrationKey(book.book_id, currentPageNumber, illustrationUrl);
 
-  console.log(
-    `BookModal.js: Page ${currentPage + 1} illustrationUrl:`,
-    illustrationUrl
-  );
-  console.log(
-    `BookModal.js: Page ${currentPage + 1} content:`,
-    page.content
-  );
+  useEffect(() => {
+    const knownDimensions = knownIllustrationDimensionsRef.current.get(illustrationKey) ?? null;
+    setIllustrationDimensions(knownDimensions);
 
-  console.log("BookModal.js: Rendering Page:", currentPage + 1);
-  console.log("BookModal.js: Text Content:", textContent);
+    if (!illustrationUrl) {
+      setIllustrationStatus("missing");
+      console.debug(`[BookModal] No illustration available for page ${currentPageNumber}`);
+      return;
+    }
+
+    setIllustrationStatus("loading");
+    console.debug(`[BookModal] Starting illustration transition for page ${currentPageNumber}`);
+  }, [currentPageNumber, illustrationKey, illustrationUrl]);
+
+  const illustrationFrameStyle = illustrationDimensions
+    ? {
+        aspectRatio: `${illustrationDimensions.width} / ${illustrationDimensions.height}`,
+      }
+    : {
+        aspectRatio: DEFAULT_ILLUSTRATION_ASPECT_RATIO,
+      };
+
+  const showPlaceholder = illustrationStatus !== "loaded";
+  const placeholderLabel = `page ${currentPageNumber} illustration`;
 
   return (
     <div style={styles.overlay}>
@@ -96,23 +92,47 @@ const BookModal = ({ book, onClose }) => {
         <h2 style={styles.title}>{book.book_title}</h2>
 
         {/* Image Display */}
-        {illustrationUrl ? (
-          <img
-            src={illustrationUrl}
-            alt={`Illustration for page ${currentPageNumber}`}
-            style={styles.image}
-            onError={(e) => {
-              console.error(
-                `Failed to load image for page ${currentPageNumber}`,
-                e
-              );
-              e.target.onerror = null; // Prevent infinite loop if fallback also fails
-              e.target.src = "";
-            }}
-          />
-        ) : (
-          <div style={styles.noImage}>No Image Available</div>
-        )}
+        <div style={{ ...styles.illustrationFrame, ...illustrationFrameStyle }}>
+          {showPlaceholder && (
+            <div
+              aria-label={placeholderLabel}
+              data-testid="page-illustration-placeholder"
+              style={styles.placeholder}
+            >
+              {placeholderLabel}
+            </div>
+          )}
+          {illustrationUrl && illustrationStatus !== "error" ? (
+            <img
+              key={illustrationKey}
+              src={illustrationUrl}
+              alt={`Illustration for page ${currentPageNumber}`}
+              style={{
+                ...styles.image,
+                ...(showPlaceholder ? styles.imageHidden : styles.imageVisible),
+              }}
+              onLoad={(event) => {
+                const nextDimensions = {
+                  width: event.currentTarget.naturalWidth || 0,
+                  height: event.currentTarget.naturalHeight || 0,
+                };
+
+                if (nextDimensions.width > 0 && nextDimensions.height > 0) {
+                  knownIllustrationDimensionsRef.current.set(illustrationKey, nextDimensions);
+                  setIllustrationDimensions(nextDimensions);
+                }
+
+                setIllustrationStatus("loaded");
+                console.debug(`[BookModal] Illustration loaded for page ${currentPageNumber}`);
+              }}
+              onError={(event) => {
+                console.error(`Failed to load image for page ${currentPageNumber}`, event);
+                setIllustrationStatus("error");
+                event.currentTarget.onerror = null;
+              }}
+            />
+          ) : null}
+        </div>
 
         {/* Text Content */}
         {textContent ? (
@@ -204,21 +224,40 @@ const styles = {
     textAlign: "center",
   },
   image: {
-    maxWidth: "100%",
-    maxHeight: "80%",
+    width: "100%",
+    height: "100%",
     objectFit: "contain",
+  },
+  imageHidden: {
+    opacity: 0,
+    pointerEvents: "none",
+  },
+  imageVisible: {
+    opacity: 1,
+  },
+  illustrationFrame: {
+    flexGrow: 1,
+    width: "100%",
+    minHeight: "320px",
     marginTop: "10px",
     marginBottom: "10px",
+    position: "relative",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  noImage: {
-    flexGrow: 1,
+  placeholder: {
+    position: "absolute",
+    inset: 0,
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
     color: "#888",
     fontStyle: "italic",
-    marginTop: "10px",
-    marginBottom: "10px",
+    textTransform: "none",
+    border: "1px dashed #d0d0d0",
+    borderRadius: "8px",
+    backgroundColor: "#fafafa",
   },
   textContent: {
     fontSize: "20px",
