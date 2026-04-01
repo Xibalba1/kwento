@@ -1,29 +1,33 @@
 import { logImageEvent } from "../debug/imageDebug";
 
-const CACHE_VERSION = 1;
-const TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const METADATA_CACHE_VERSION = 1;
+const FULL_BOOK_SCHEMA_VERSION = 2;
+const METADATA_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const FULL_BOOK_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+const FULL_BOOK_MAX_BYTES = 100 * 1024 * 1024;
 const DB_NAME = "kwento-cache";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const ASSETS_STORE = "assets";
 const BOOKS_STORE = "books";
 const METADATA_KEY = "kwento_shelf_metadata_v1";
-
-const CACHE_CLASS_SHELF_COVER = "shelf-cover";
 const CACHE_CLASS_FULL_BOOK = "full-book";
+const CACHE_CLASS_SHELF_COVER = "shelf-cover";
 
 let dbPromise = null;
+let maintenancePromise = null;
+let maintenanceComplete = false;
 
 const hasLocalStorage = () => typeof window !== "undefined" && window.localStorage;
 const hasIndexedDb = () => typeof window !== "undefined" && window.indexedDB;
 
 const now = () => Date.now();
 
-const withExpiry = (value = {}) => {
+const withExpiry = (value = {}, ttlMs) => {
   const updatedAt = value.updatedAt ?? now();
   return {
     ...value,
     updatedAt,
-    expiresAt: value.expiresAt ?? updatedAt + TTL_MS,
+    expiresAt: value.expiresAt ?? updatedAt + ttlMs,
   };
 };
 
@@ -55,6 +59,8 @@ const writeLocalStorageJson = (key, value) => {
 
 const resetDatabasePromise = () => {
   dbPromise = null;
+  maintenancePromise = null;
+  maintenanceComplete = false;
 };
 
 const isRecoverableDatabaseError = (error) => {
@@ -222,7 +228,127 @@ const deleteRecord = (storeName, key) =>
 const getAllRecords = (storeName) =>
   runTransaction(storeName, "readonly", (store) => store.getAll());
 
-const safeFetchBlob = async (url) => {
+const fullBookKey = (bookId) => `book:${bookId}`;
+
+const isExpired = (entry) => Boolean(entry?.expiresAt && entry.expiresAt < now());
+
+const deleteEntries = async (entries) => {
+  await Promise.all(
+    entries.map(async (entry) => {
+      if (entry.storeName && entry.id) {
+        await deleteRecord(entry.storeName, entry.id);
+      }
+    }),
+  );
+};
+
+const estimateRecordSize = (record) => {
+  if (!record) {
+    return 0;
+  }
+
+  if (record.byteLength) {
+    return record.byteLength;
+  }
+
+  if (record.arrayBuffer instanceof ArrayBuffer) {
+    return record.arrayBuffer.byteLength;
+  }
+
+  try {
+    return new Blob([JSON.stringify(record)]).size;
+  } catch (error) {
+    return 0;
+  }
+};
+
+const isLegacyAssetRecord = (entry) => {
+  if (!entry) {
+    return false;
+  }
+
+  if (entry.cacheClass === CACHE_CLASS_SHELF_COVER) {
+    return true;
+  }
+
+  if (entry.cacheClass !== CACHE_CLASS_FULL_BOOK) {
+    return false;
+  }
+
+  return (
+    entry.schemaVersion !== FULL_BOOK_SCHEMA_VERSION ||
+    entry.blob != null ||
+    !(entry.arrayBuffer instanceof ArrayBuffer)
+  );
+};
+
+const isLegacyBookRecord = (entry) =>
+  entry?.cacheClass === CACHE_CLASS_FULL_BOOK && entry.schemaVersion !== FULL_BOOK_SCHEMA_VERSION;
+
+const ensureCacheMaintenance = async () => {
+  if (maintenanceComplete) {
+    return;
+  }
+
+  if (maintenancePromise) {
+    return maintenancePromise;
+  }
+
+  maintenancePromise = (async () => {
+    const [assetRecords, bookRecords] = await Promise.all([
+      getAllRecords(ASSETS_STORE),
+      getAllRecords(BOOKS_STORE),
+    ]);
+
+    const assets = assetRecords ?? [];
+    const books = bookRecords ?? [];
+    const removals = [];
+
+    assets.forEach((entry) => {
+      if (isLegacyAssetRecord(entry)) {
+        removals.push({
+          storeName: ASSETS_STORE,
+          id: entry.id,
+        });
+      }
+    });
+
+    books.forEach((entry) => {
+      if (isLegacyBookRecord(entry)) {
+        removals.push({
+          storeName: BOOKS_STORE,
+          id: entry.id,
+        });
+
+        (entry.assets ?? []).forEach((asset) => {
+          if (asset?.key) {
+            removals.push({
+              storeName: ASSETS_STORE,
+              id: asset.key,
+            });
+          }
+        });
+      }
+    });
+
+    if (removals.length > 0) {
+      logImageEvent("cache:legacy_cleanup", {
+        removal_count: removals.length,
+      });
+      await deleteEntries(removals);
+    }
+
+    maintenanceComplete = true;
+  })();
+
+  try {
+    await maintenancePromise;
+  } finally {
+    maintenancePromise = null;
+  }
+};
+
+const safeFetchAsset = async (url) => {
   const startedAt = now();
   const response = await fetch(url);
   if (!response.ok) {
@@ -234,23 +360,23 @@ const safeFetchBlob = async (url) => {
     throw new Error(`Failed to fetch asset. status=${response.status}`);
   }
 
-  const blob = await response.blob();
+  const arrayBuffer = await response.arrayBuffer();
+  const contentType = response.headers?.get?.("content-type") || null;
   logImageEvent("cache:fetch_success", {
     source_url: url,
     status: response.status,
     duration_ms: now() - startedAt,
-    blob_size: blob.size,
-    content_type: blob.type || response.headers?.get?.("content-type") || null,
+    byte_length: arrayBuffer.byteLength,
+    content_type: contentType,
   });
-  return blob;
+
+  return {
+    arrayBuffer,
+    contentType,
+    byteLength: arrayBuffer.byteLength,
+  };
 };
 
-const shelfCoverKey = (bookId) => `cover:${bookId}`;
-const fullBookKey = (bookId) => `book:${bookId}`;
-
-const isExpired = (entry) => Boolean(entry?.expiresAt && entry.expiresAt < now());
-
-const approximateBlobSize = (blob) => blob?.size ?? 0;
 const toObjectUrl = (blob, fallbackUrl = null, debugContext = {}) => {
   if (typeof URL?.createObjectURL !== "function") {
     logImageEvent("cache:object_url_fallback", {
@@ -271,25 +397,13 @@ const toObjectUrl = (blob, fallbackUrl = null, debugContext = {}) => {
   return objectUrl;
 };
 
-const estimateRecordSize = (record) => {
-  if (!record) {
-    return 0;
-  }
-
-  if (record.blob) {
-    return approximateBlobSize(record.blob);
-  }
-
-  try {
-    return new Blob([JSON.stringify(record)]).size;
-  } catch (error) {
-    return 0;
-  }
-};
-
 export const loadShelfMetadataSync = () => {
   const entry = readLocalStorageJson(METADATA_KEY);
-  if (!entry || entry.version !== CACHE_VERSION || !Array.isArray(entry.books)) {
+  if (!entry || !Array.isArray(entry.books)) {
+    return null;
+  }
+
+  if (entry.version !== METADATA_CACHE_VERSION || isExpired(entry)) {
     return null;
   }
 
@@ -297,138 +411,16 @@ export const loadShelfMetadataSync = () => {
 };
 
 export const saveShelfMetadata = async (books) => {
-  const entry = withExpiry({
-    version: CACHE_VERSION,
-    books: Array.isArray(books) ? books : [],
-  });
+  const entry = withExpiry(
+    {
+      version: METADATA_CACHE_VERSION,
+      books: Array.isArray(books) ? books : [],
+    },
+    METADATA_TTL_MS,
+  );
 
   writeLocalStorageJson(METADATA_KEY, entry);
   return entry;
-};
-
-export const getCachedShelfCover = async (bookId, sourceUrl) => {
-  const entry = await getRecord(ASSETS_STORE, shelfCoverKey(bookId));
-  if (!entry || !entry.blob || isExpired(entry)) {
-    logImageEvent("cover:get_cached_miss", {
-      book_id: bookId,
-      source_url: sourceUrl,
-      cache_entry_present: Boolean(entry),
-      expired: isExpired(entry),
-    });
-    console.debug(`[libraryCache] shelf cover miss for ${bookId}`);
-    return null;
-  }
-
-  if (sourceUrl && entry.sourceUrl !== sourceUrl) {
-    entry.sourceUrl = sourceUrl;
-  }
-
-  entry.lastUsedAt = now();
-  await putRecord(ASSETS_STORE, entry);
-  logImageEvent("cover:get_cached_hit", {
-    book_id: bookId,
-    source_url: sourceUrl,
-    cached_source_url: entry.sourceUrl ?? null,
-    blob_size: approximateBlobSize(entry.blob),
-  });
-  console.debug(
-    `[libraryCache] shelf cover hit for ${bookId} via cached blob (${sourceUrl ? "remote-source-observed" : "no-source"})`,
-  );
-  return toObjectUrl(entry.blob, entry.sourceUrl ?? sourceUrl, {
-    book_id: bookId,
-    source_url: entry.sourceUrl ?? sourceUrl,
-    origin: "getCachedShelfCover",
-  });
-};
-
-export const hasCachedShelfCover = async (bookId, sourceUrl) => {
-  const entry = await getRecord(ASSETS_STORE, shelfCoverKey(bookId));
-  if (!entry || !entry.blob || isExpired(entry)) {
-    logImageEvent("cover:has_cached_miss", {
-      book_id: bookId,
-      source_url: sourceUrl,
-      cache_entry_present: Boolean(entry),
-      expired: isExpired(entry),
-    });
-    console.debug(`[libraryCache] hasCachedShelfCover miss for ${bookId}`);
-    return false;
-  }
-
-  if (sourceUrl && entry.sourceUrl !== sourceUrl) {
-    entry.sourceUrl = sourceUrl;
-    await putRecord(ASSETS_STORE, entry);
-  }
-
-  logImageEvent("cover:has_cached_hit", {
-    book_id: bookId,
-    source_url: sourceUrl,
-    cached_source_url: entry.sourceUrl ?? null,
-    blob_size: approximateBlobSize(entry.blob),
-  });
-  console.debug(`[libraryCache] hasCachedShelfCover hit for ${bookId}`);
-  return true;
-};
-
-export const cacheShelfCover = async ({ bookId, sourceUrl }) => {
-  if (!bookId || !sourceUrl) {
-    logImageEvent("cover:cache_skip", {
-      book_id: bookId,
-      source_url: sourceUrl,
-    });
-    return null;
-  }
-
-  const db = await openDatabase();
-  if (!db) {
-    logImageEvent("cover:cache_bypass", {
-      book_id: bookId,
-      source_url: sourceUrl,
-      reason: "no_indexeddb",
-    });
-    return sourceUrl;
-  }
-
-  const existing = await getRecord(ASSETS_STORE, shelfCoverKey(bookId));
-  if (existing?.blob && !isExpired(existing)) {
-    existing.sourceUrl = sourceUrl;
-    existing.lastUsedAt = now();
-    await putRecord(ASSETS_STORE, existing);
-    logImageEvent("cover:cache_hit_reuse", {
-      book_id: bookId,
-      source_url: sourceUrl,
-      blob_size: approximateBlobSize(existing.blob),
-    });
-    console.debug(`[libraryCache] shelf cover cache hit for ${bookId}; reusing cached blob`);
-    return toObjectUrl(existing.blob, existing.sourceUrl, {
-      book_id: bookId,
-      source_url: existing.sourceUrl,
-      origin: "cacheShelfCover:existing",
-    });
-  }
-
-  const blob = await safeFetchBlob(sourceUrl);
-  const entry = withExpiry({
-    id: shelfCoverKey(bookId),
-    bookId,
-    sourceUrl,
-    blob,
-    cacheClass: CACHE_CLASS_SHELF_COVER,
-    lastUsedAt: now(),
-  });
-
-  await putRecord(ASSETS_STORE, entry);
-  logImageEvent("cover:cache_store", {
-    book_id: bookId,
-    source_url: sourceUrl,
-    blob_size: approximateBlobSize(blob),
-    expires_at: entry.expiresAt,
-  });
-  console.debug(`[libraryCache] shelf cover cache miss for ${bookId}; fetched remote asset`);
-  return toObjectUrl(blob, sourceUrl, {
-    book_id: bookId,
-    source_url: sourceUrl,
-    origin: "cacheShelfCover:fetched",
-  });
 };
 
 const buildFullBookAssetEntries = async (book) => {
@@ -459,17 +451,23 @@ const buildFullBookAssetEntries = async (book) => {
 
   const assets = await Promise.all(
     assetDescriptors.map(async (asset) => {
-      const blob = await safeFetchBlob(asset.sourceUrl);
-      const entry = withExpiry({
-        id: asset.key,
-        bookId: book.book_id,
-        page: asset.page,
-        sourceUrl: asset.sourceUrl,
-        blob,
-        cacheClass: CACHE_CLASS_FULL_BOOK,
-        assetType: asset.type,
-        lastUsedAt: now(),
-      });
+      const { arrayBuffer, contentType, byteLength } = await safeFetchAsset(asset.sourceUrl);
+      const entry = withExpiry(
+        {
+          id: asset.key,
+          schemaVersion: FULL_BOOK_SCHEMA_VERSION,
+          bookId: book.book_id,
+          page: asset.page,
+          sourceUrl: asset.sourceUrl,
+          arrayBuffer,
+          byteLength,
+          contentType,
+          cacheClass: CACHE_CLASS_FULL_BOOK,
+          assetType: asset.type,
+          lastUsedAt: now(),
+        },
+        FULL_BOOK_TTL_MS,
+      );
 
       await putRecord(ASSETS_STORE, entry);
       return {
@@ -484,6 +482,27 @@ const buildFullBookAssetEntries = async (book) => {
   return assets;
 };
 
+const deleteFullBookPackage = async (packageRecord) => {
+  if (!packageRecord) {
+    return;
+  }
+
+  const removals = [
+    {
+      storeName: BOOKS_STORE,
+      id: packageRecord.id,
+    },
+    ...(packageRecord.assets ?? [])
+      .filter((asset) => asset?.key)
+      .map((asset) => ({
+        storeName: ASSETS_STORE,
+        id: asset.key,
+      })),
+  ];
+
+  await deleteEntries(removals);
+};
+
 export const saveFullBookPackage = async (book) => {
   if (!book?.book_id) {
     return null;
@@ -494,18 +513,29 @@ export const saveFullBookPackage = async (book) => {
     return null;
   }
 
+  await ensureCacheMaintenance();
+
+  const existingPackage = await getRecord(BOOKS_STORE, fullBookKey(book.book_id));
+  if (existingPackage) {
+    await deleteFullBookPackage(existingPackage);
+  }
+
   const assets = await buildFullBookAssetEntries(book);
-  const packageRecord = withExpiry({
-    id: fullBookKey(book.book_id),
-    bookId: book.book_id,
-    cacheClass: CACHE_CLASS_FULL_BOOK,
-    lastUsedAt: now(),
-    package: {
-      ...book,
-      cachedAt: now(),
+  const packageRecord = withExpiry(
+    {
+      id: fullBookKey(book.book_id),
+      schemaVersion: FULL_BOOK_SCHEMA_VERSION,
+      bookId: book.book_id,
+      cacheClass: CACHE_CLASS_FULL_BOOK,
+      lastUsedAt: now(),
+      package: {
+        ...book,
+        cachedAt: now(),
+      },
+      assets,
     },
-    assets,
-  });
+    FULL_BOOK_TTL_MS,
+  );
 
   await putRecord(BOOKS_STORE, packageRecord);
   return packageRecord;
@@ -517,28 +547,67 @@ export const getCachedFullBook = async (bookId) => {
     return null;
   }
 
+  await ensureCacheMaintenance();
+
   const packageRecord = await getRecord(BOOKS_STORE, fullBookKey(bookId));
-  if (!packageRecord || !packageRecord.package || isExpired(packageRecord)) {
+  if (!packageRecord || !packageRecord.package) {
+    return null;
+  }
+
+  if (packageRecord.schemaVersion !== FULL_BOOK_SCHEMA_VERSION || isExpired(packageRecord)) {
+    await deleteFullBookPackage(packageRecord);
+    logImageEvent("full_book:cache_invalidated", {
+      book_id: bookId,
+      reason: isExpired(packageRecord) ? "expired" : "schema_mismatch",
+    });
     return null;
   }
 
   const assets = await Promise.all(
     (packageRecord.assets ?? []).map(async (asset) => {
       const entry = await getRecord(ASSETS_STORE, asset.key);
-      if (!entry?.blob || isExpired(entry)) {
+      if (
+        !entry ||
+        entry.schemaVersion !== FULL_BOOK_SCHEMA_VERSION ||
+        isExpired(entry) ||
+        !(entry.arrayBuffer instanceof ArrayBuffer)
+      ) {
         return null;
       }
 
       entry.lastUsedAt = now();
       await putRecord(ASSETS_STORE, entry);
+
+      const blob = new Blob([entry.arrayBuffer], {
+        type: entry.contentType || "application/octet-stream",
+      });
+      const objectUrl = toObjectUrl(blob, entry.sourceUrl, {
+        book_id: bookId,
+        source_url: entry.sourceUrl,
+        origin: "getCachedFullBook",
+      });
+      logImageEvent("full_book:asset_reconstructed", {
+        book_id: bookId,
+        asset_key: asset.key,
+        asset_type: asset.type,
+        page: asset.page,
+        byte_length: entry.byteLength ?? entry.arrayBuffer.byteLength,
+        content_type: entry.contentType || null,
+      });
+
       return {
         ...asset,
-        objectUrl: toObjectUrl(entry.blob, entry.sourceUrl),
+        objectUrl,
       };
     }),
   );
 
   if (assets.some((asset) => asset === null)) {
+    await deleteFullBookPackage(packageRecord);
+    logImageEvent("full_book:cache_invalidated", {
+      book_id: bookId,
+      reason: "missing_asset",
+    });
     return null;
   }
 
@@ -567,17 +636,9 @@ export const getCachedFullBook = async (bookId) => {
   };
 };
 
-const deleteEntries = async (entries) => {
-  await Promise.all(
-    entries.map(async (entry) => {
-      if (entry.storeName && entry.id) {
-        await deleteRecord(entry.storeName, entry.id);
-      }
-    }),
-  );
-};
+export const enforceCacheBudget = async ({ maxBytes = FULL_BOOK_MAX_BYTES } = {}) => {
+  await ensureCacheMaintenance();
 
-export const enforceCacheBudget = async ({ maxBytes = 500 * 1024 * 1024 } = {}) => {
   const [assetRecords, bookRecords] = await Promise.all([
     getAllRecords(ASSETS_STORE),
     getAllRecords(BOOKS_STORE),
@@ -585,55 +646,66 @@ export const enforceCacheBudget = async ({ maxBytes = 500 * 1024 * 1024 } = {}) 
 
   const assets = assetRecords ?? [];
   const books = bookRecords ?? [];
-  const metadata = loadShelfMetadataSync();
-  const metadataSize = metadata ? estimateRecordSize(metadata) : 0;
-
-  const candidates = [
-    ...books.map((entry) => ({ ...entry, storeName: BOOKS_STORE, size: estimateRecordSize(entry) })),
-    ...assets.map((entry) => ({ ...entry, storeName: ASSETS_STORE, size: estimateRecordSize(entry) })),
-  ];
-
-  let totalSize = metadataSize + candidates.reduce((sum, entry) => sum + entry.size, 0);
-  if (totalSize <= maxBytes) {
-    return;
-  }
-
-  const evictionPriority = (entry) => {
-    if (entry.cacheClass === CACHE_CLASS_FULL_BOOK) {
-      return 0;
-    }
-
-    if (entry.cacheClass === CACHE_CLASS_SHELF_COVER) {
-      return 1;
-    }
-
-    return 2;
-  };
-
-  const evictableEntries = candidates.sort((left, right) => {
-    const classDelta = evictionPriority(left) - evictionPriority(right);
-    if (classDelta !== 0) {
-      return classDelta;
-    }
-
-    const leftExpired = isExpired(left) ? 0 : 1;
-    const rightExpired = isExpired(right) ? 0 : 1;
-    if (leftExpired !== rightExpired) {
-      return leftExpired - rightExpired;
-    }
-
-    return (left.lastUsedAt ?? left.updatedAt ?? 0) - (right.lastUsedAt ?? right.updatedAt ?? 0);
-  });
+  const assetEntriesById = new Map(assets.map((entry) => [entry.id, entry]));
+  const packageRecords = books.filter(
+    (entry) =>
+      entry?.cacheClass === CACHE_CLASS_FULL_BOOK && entry.schemaVersion === FULL_BOOK_SCHEMA_VERSION,
+  );
 
   const removals = [];
-  for (const entry of evictableEntries) {
-    if (totalSize <= maxBytes) {
+  let totalSize = 0;
+  const packageSummaries = packageRecords.map((entry) => {
+    const packageSize = estimateRecordSize(entry);
+    const assetSize = (entry.assets ?? []).reduce((sum, asset) => {
+      const assetEntry = assetEntriesById.get(asset.key);
+      return sum + estimateRecordSize(assetEntry);
+    }, 0);
+    const size = packageSize + assetSize;
+
+    totalSize += size;
+    return {
+      entry,
+      size,
+      expired: isExpired(entry),
+      lastUsedAt: entry.lastUsedAt ?? entry.updatedAt ?? 0,
+    };
+  });
+
+  packageSummaries.forEach((summary) => {
+    if (summary.expired) {
+      removals.push(summary.entry);
+    }
+  });
+
+  if (removals.length > 0) {
+    await Promise.all(removals.map((entry) => deleteFullBookPackage(entry)));
+    logImageEvent("full_book:budget_cleanup", {
+      expired_package_count: removals.length,
+      total_size_before_eviction: totalSize,
+    });
+  }
+
+  const activePackages = packageSummaries
+    .filter((summary) => !summary.expired)
+    .sort((left, right) => left.lastUsedAt - right.lastUsedAt);
+
+  let activeSize = activePackages.reduce((sum, summary) => sum + summary.size, 0);
+  const evictedBookIds = [];
+  for (const summary of activePackages) {
+    if (activeSize <= maxBytes) {
       break;
     }
 
-    removals.push(entry);
-    totalSize -= entry.size;
+    await deleteFullBookPackage(summary.entry);
+    activeSize -= summary.size;
+    evictedBookIds.push(summary.entry.bookId);
   }
 
-  await deleteEntries(removals);
+  if (evictedBookIds.length > 0) {
+    logImageEvent("full_book:budget_eviction", {
+      evicted_book_ids: evictedBookIds,
+      max_bytes: maxBytes,
+      total_size_after_eviction: activeSize,
+    });
+  }
 };

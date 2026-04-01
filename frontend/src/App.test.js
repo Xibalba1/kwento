@@ -2,11 +2,8 @@ import { act } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import App from "./App";
 
-const mockCacheShelfCover = jest.fn();
 const mockEnforceCacheBudget = jest.fn();
 const mockGetCachedFullBook = jest.fn();
-const mockGetCachedShelfCover = jest.fn();
-const mockHasCachedShelfCover = jest.fn();
 const mockLoadShelfMetadataSync = jest.fn();
 const mockSaveFullBookPackage = jest.fn();
 const mockSaveShelfMetadata = jest.fn();
@@ -16,11 +13,8 @@ jest.mock("./config", () => ({
 }));
 
 jest.mock("./cache/libraryCache", () => ({
-  cacheShelfCover: (...args) => mockCacheShelfCover(...args),
   enforceCacheBudget: (...args) => mockEnforceCacheBudget(...args),
   getCachedFullBook: (...args) => mockGetCachedFullBook(...args),
-  getCachedShelfCover: (...args) => mockGetCachedShelfCover(...args),
-  hasCachedShelfCover: (...args) => mockHasCachedShelfCover(...args),
   loadShelfMetadataSync: (...args) => mockLoadShelfMetadataSync(...args),
   saveFullBookPackage: (...args) => mockSaveFullBookPackage(...args),
   saveShelfMetadata: (...args) => mockSaveShelfMetadata(...args),
@@ -46,11 +40,8 @@ beforeEach(() => {
   window.localStorage.clear();
   global.URL.createObjectURL = jest.fn((value) => `blob:${String(value)}`);
   global.URL.revokeObjectURL = jest.fn();
-  mockCacheShelfCover.mockResolvedValue(null);
   mockEnforceCacheBudget.mockResolvedValue(undefined);
   mockGetCachedFullBook.mockResolvedValue(null);
-  mockGetCachedShelfCover.mockResolvedValue(null);
-  mockHasCachedShelfCover.mockResolvedValue(false);
   mockLoadShelfMetadataSync.mockImplementation(() => {
     const raw = window.localStorage.getItem("kwento_shelf_metadata_v1");
     return raw ? JSON.parse(raw) : null;
@@ -282,4 +273,25 @@ test("revokes cached book object URLs when the modal closes, not when it opens",
     expect(global.URL.revokeObjectURL).toHaveBeenCalledWith("blob:book-2-cover");
     expect(global.URL.revokeObjectURL).toHaveBeenCalledWith("blob:book-2-page-1");
   });
+});
+
+test("renders shelf covers from the remote cover_url", async () => {
+  global.fetch.mockResolvedValueOnce({
+    ok: true,
+    json: async () => [
+      {
+        book_id: "book-remote-cover",
+        book_title: "Remote Cover Book",
+        cover_url: "https://example.com/remote-cover.png",
+      },
+    ],
+  });
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  const image = await screen.findByRole("img", { name: /cover for remote cover book/i });
+  expect(image).toHaveAttribute("src", "https://example.com/remote-cover.png");
+  expect(global.URL.createObjectURL).not.toHaveBeenCalled();
 });
