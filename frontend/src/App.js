@@ -1,22 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ThemeInput from "./components/ThemeInput";
 import BookModal from "./components/BookModal";
 import BookList from "./components/BookList";
 import { buildApiUrl } from "./config";
 import {
-  cacheShelfCover,
   enforceCacheBudget,
   getCachedFullBook,
-  getCachedShelfCover,
-  hasCachedShelfCover,
   loadShelfMetadataSync,
   saveFullBookPackage,
   saveShelfMetadata,
 } from "./cache/libraryCache";
 import { getImageDebugPageContext, logImageEvent } from "./debug/imageDebug";
-
-const COVER_DOWNLOAD_CONCURRENCY = 3;
-const INITIAL_VISIBLE_BOOK_COUNT = 6;
 
 const releaseObjectUrls = (urls = []) => {
   if (typeof URL?.revokeObjectURL !== "function") {
@@ -39,71 +33,26 @@ const App = () => {
   const [libraryBooks, setLibraryBooks] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryError, setLibraryError] = useState(false);
-  const [visibleBookIds, setVisibleBookIds] = useState([]);
-  const [coverStateByBookId, setCoverStateByBookId] = useState({});
+  const [, setVisibleBookIds] = useState([]);
   const libraryFetchPromiseRef = useRef(null);
-  const cachedCoverUrlsRef = useRef({});
   const cachedBookObjectUrlsRef = useRef([]);
-  const coverStateByBookIdRef = useRef({});
-  const previousCoverUrlsRef = useRef({});
   const previousBookObjectUrlsRef = useRef([]);
-  const coverQueueRef = useRef([]);
-  const queuedCoverBookIdsRef = useRef(new Set());
-  const pendingCoverBookIdsRef = useRef(new Set());
   const inFlightBookSelectionRef = useRef(new Map());
-
-  const updateCoverState = ({ bookId, status, sourceUrl }) => {
-    setCoverStateByBookId((currentState) => {
-      cachedCoverUrlsRef.current[bookId] = sourceUrl ?? null;
-      const previousState = currentState[bookId] ?? null;
-
-      const nextState = {
-        ...currentState,
-        [bookId]: {
-          status,
-          url: sourceUrl ?? null,
-        },
-      };
-
-      logImageEvent("cover:state_updated", {
-        book_id: bookId,
-        previous_status: previousState?.status ?? null,
-        next_status: status,
-        render_cover_url: sourceUrl ?? null,
-      });
-      coverStateByBookIdRef.current = nextState;
-      return nextState;
-    });
-  };
-
-  const markCoverStatus = (bookId, status) => {
-    setCoverStateByBookId((currentState) => {
-      const previousState = currentState[bookId] ?? null;
-      const nextState = {
-        ...currentState,
-        [bookId]: {
-          ...(currentState[bookId] ?? {}),
-          status,
-        },
-      };
-
-      logImageEvent("cover:status_marked", {
-        book_id: bookId,
-        previous_status: previousState?.status ?? null,
-        next_status: status,
-        render_cover_url: previousState?.url ?? null,
-      });
-      coverStateByBookIdRef.current = nextState;
-      return nextState;
-    });
-  };
 
   const cacheFullBookInBackground = async (completeBookData) => {
     try {
       await saveFullBookPackage(completeBookData);
       await enforceCacheBudget();
+      logImageEvent("full_book:cache_saved", {
+        book_id: completeBookData.book_id,
+        image_count: completeBookData.images?.length ?? 0,
+      });
     } catch (error) {
       console.warn("Failed to cache full book package:", error);
+      logImageEvent("full_book:cache_save_error", {
+        book_id: completeBookData?.book_id ?? null,
+        error,
+      });
     }
   };
 
@@ -211,72 +160,6 @@ const App = () => {
     };
   };
 
-  const pumpCoverQueue = async () => {
-    if (pendingCoverBookIdsRef.current.size >= COVER_DOWNLOAD_CONCURRENCY) {
-      logImageEvent("cover:queue_backpressure", {
-        pending_count: pendingCoverBookIdsRef.current.size,
-        queued_count: coverQueueRef.current.length,
-      });
-      return;
-    }
-
-    while (
-      pendingCoverBookIdsRef.current.size < COVER_DOWNLOAD_CONCURRENCY &&
-      coverQueueRef.current.length > 0
-    ) {
-      const nextTask = coverQueueRef.current.shift();
-      if (!nextTask?.bookId || !nextTask?.coverUrl) {
-        continue;
-      }
-
-      pendingCoverBookIdsRef.current.add(nextTask.bookId);
-      queuedCoverBookIdsRef.current.delete(nextTask.bookId);
-      logImageEvent("cover:queue_dequeued", {
-        book_id: nextTask.bookId,
-        source_url: nextTask.coverUrl,
-        pending_count: pendingCoverBookIdsRef.current.size,
-        queued_count: coverQueueRef.current.length,
-      });
-      markCoverStatus(nextTask.bookId, "pending");
-
-      cacheShelfCover({
-        bookId: nextTask.bookId,
-        sourceUrl: nextTask.coverUrl,
-      })
-        .then(async (objectUrl) => {
-          logImageEvent("cover:queue_resolved", {
-            book_id: nextTask.bookId,
-            source_url: nextTask.coverUrl,
-            render_cover_url: objectUrl,
-          });
-          updateCoverState({
-            bookId: nextTask.bookId,
-            status: "cached",
-            sourceUrl: objectUrl,
-          });
-          await enforceCacheBudget();
-        })
-        .catch((error) => {
-          console.warn(`Failed to cache cover for ${nextTask.bookId}:`, error);
-          logImageEvent("cover:queue_failed", {
-            book_id: nextTask.bookId,
-            source_url: nextTask.coverUrl,
-            error,
-          });
-          markCoverStatus(nextTask.bookId, "failed");
-        })
-        .finally(() => {
-          pendingCoverBookIdsRef.current.delete(nextTask.bookId);
-          logImageEvent("cover:queue_finalized", {
-            book_id: nextTask.bookId,
-            pending_count: pendingCoverBookIdsRef.current.size,
-            queued_count: coverQueueRef.current.length,
-          });
-          void pumpCoverQueue();
-        });
-    }
-  };
-
   useEffect(() => {
     logImageEvent("app:mount", getImageDebugPageContext());
     const cachedMetadata = loadShelfMetadataSync();
@@ -321,191 +204,10 @@ const App = () => {
   }, [libraryBooks]);
 
   useEffect(() => {
-    if (libraryBooks.length === 0) {
-      return;
-    }
-
-    const visibleSet = new Set(
-      visibleBookIds.length > 0
-        ? visibleBookIds
-        : libraryBooks.slice(0, INITIAL_VISIBLE_BOOK_COUNT).map((entry) => entry.book_id),
-    );
-    logImageEvent("shelf:visible_set_computed", {
-      visible_book_ids: Array.from(visibleSet),
-      library_count: libraryBooks.length,
-    });
-
-    const visibleBooks = [];
-    const nearViewportBooks = [];
-    const visibleIndexes = [];
-
-    libraryBooks.forEach((bookEntry, index) => {
-      if (visibleSet.has(bookEntry.book_id)) {
-        visibleBooks.push(bookEntry);
-        visibleIndexes.push(index);
-        return;
-      }
-    });
-
-    const nearestVisibleIndex =
-      visibleIndexes.length > 0 ? Math.min(...visibleIndexes) : 0;
-    const furthestVisibleIndex =
-      visibleIndexes.length > 0 ? Math.max(...visibleIndexes) : INITIAL_VISIBLE_BOOK_COUNT - 1;
-
-    libraryBooks.forEach((bookEntry, index) => {
-      if (visibleSet.has(bookEntry.book_id)) {
-        return;
-      }
-
-      if (
-        index >= Math.max(0, nearestVisibleIndex - 4) &&
-        index <= Math.min(libraryBooks.length - 1, furthestVisibleIndex + 4)
-      ) {
-        nearViewportBooks.push(bookEntry);
-      }
-    });
-
-    const hydrateAndQueueCovers = async () => {
-      logImageEvent("cover:hydrate_start", {
-        visible_book_ids: visibleBooks.map((bookEntry) => bookEntry.book_id),
-        near_viewport_book_ids: nearViewportBooks.map((bookEntry) => bookEntry.book_id),
-      });
-      await Promise.all(
-        visibleBooks.map(async (bookEntry) => {
-          if (!bookEntry?.book_id || !bookEntry.cover_url) {
-            return;
-          }
-
-          if (coverStateByBookIdRef.current[bookEntry.book_id]?.status === "cached") {
-            logImageEvent("cover:hydrate_skip_cached", {
-              book_id: bookEntry.book_id,
-            });
-            return;
-          }
-
-          try {
-            const cachedCoverUrl = await getCachedShelfCover(bookEntry.book_id, bookEntry.cover_url);
-            if (cachedCoverUrl) {
-              logImageEvent("cover:hydrate_cache_hit", {
-                book_id: bookEntry.book_id,
-                source_url: bookEntry.cover_url,
-                render_cover_url: cachedCoverUrl,
-              });
-              updateCoverState({
-                bookId: bookEntry.book_id,
-                status: "cached",
-                sourceUrl: cachedCoverUrl,
-              });
-              return;
-            }
-
-            logImageEvent("cover:hydrate_cache_miss", {
-              book_id: bookEntry.book_id,
-              source_url: bookEntry.cover_url,
-            });
-            markCoverStatus(bookEntry.book_id, "uncached");
-          } catch (error) {
-            console.warn(`Failed to hydrate cached cover for ${bookEntry.book_id}:`, error);
-            logImageEvent("cover:hydrate_failed", {
-              book_id: bookEntry.book_id,
-              source_url: bookEntry.cover_url,
-              error,
-            });
-            markCoverStatus(bookEntry.book_id, "failed");
-          }
-        }),
-      );
-
-      const candidates = [];
-      for (const bookEntry of [...visibleBooks, ...nearViewportBooks]) {
-        if (!bookEntry?.book_id || !bookEntry.cover_url) {
-          continue;
-        }
-
-        const existingState = coverStateByBookIdRef.current[bookEntry.book_id];
-        if (existingState?.status === "cached" || existingState?.status === "pending") {
-          continue;
-        }
-
-        if (queuedCoverBookIdsRef.current.has(bookEntry.book_id)) {
-          continue;
-        }
-
-        const cached = await hasCachedShelfCover(bookEntry.book_id, bookEntry.cover_url);
-        if (cached) {
-          logImageEvent("cover:queue_skip_has_cached", {
-            book_id: bookEntry.book_id,
-            source_url: bookEntry.cover_url,
-          });
-          continue;
-        }
-
-        queuedCoverBookIdsRef.current.add(bookEntry.book_id);
-        candidates.push({
-          bookId: bookEntry.book_id,
-          coverUrl: bookEntry.cover_url,
-        });
-      }
-
-      if (candidates.length === 0) {
-        logImageEvent("cover:queue_noop", {});
-        return;
-      }
-
-      coverQueueRef.current = [...candidates, ...coverQueueRef.current];
-      logImageEvent("cover:queue_enqueued", {
-        candidates: candidates.map((candidate) => ({
-          book_id: candidate.bookId,
-          source_url: candidate.coverUrl,
-        })),
-        queued_count: coverQueueRef.current.length,
-      });
-      void pumpCoverQueue();
-    };
-
-    void hydrateAndQueueCovers();
-    // The queue runner is ref-driven and should not retrigger this effect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [libraryBooks, visibleBookIds]);
-
-  const releaseAllCachedObjectUrls = () => {
-    releaseObjectUrls(Object.values(cachedCoverUrlsRef.current).filter(Boolean));
-    releaseObjectUrls(cachedBookObjectUrlsRef.current);
-  };
-
-  useEffect(() => {
     return () => {
-      releaseAllCachedObjectUrls();
+      releaseObjectUrls(cachedBookObjectUrlsRef.current);
     };
   }, []);
-
-  useEffect(() => {
-    if (typeof URL?.revokeObjectURL !== "function") {
-      previousCoverUrlsRef.current = Object.fromEntries(
-        Object.entries(coverStateByBookId).map(([bookId, state]) => [bookId, state?.url ?? null]),
-      );
-      return;
-    }
-
-    const previousUrls = previousCoverUrlsRef.current;
-    const nextUrls = Object.fromEntries(
-      Object.entries(coverStateByBookId).map(([bookId, state]) => [bookId, state?.url ?? null]),
-    );
-    const activeUrls = new Set(Object.values(nextUrls).filter(Boolean));
-
-    Object.values(previousUrls).forEach((url) => {
-      if (typeof url === "string" && url.startsWith("blob:") && !activeUrls.has(url)) {
-        console.debug(`[App] Revoking stale shelf cover object URL: ${url}`);
-        logImageEvent("cover:object_url_revoked", {
-          object_url: url,
-          reason: "stale_shelf_cover",
-        });
-        URL.revokeObjectURL(url);
-      }
-    });
-
-    previousCoverUrlsRef.current = nextUrls;
-  }, [coverStateByBookId]);
 
   useEffect(() => {
     if (typeof URL?.revokeObjectURL !== "function") {
@@ -532,20 +234,6 @@ const App = () => {
     previousBookObjectUrlsRef.current = nextUrls;
     cachedBookObjectUrlsRef.current = nextUrls;
   }, [book]);
-
-  const hydratedLibraryBooks = useMemo(
-    () =>
-      libraryBooks.map((bookEntry) => {
-        const coverState = coverStateByBookId[bookEntry.book_id];
-
-        return {
-          ...bookEntry,
-          render_cover_url: coverState?.url ?? null,
-          cover_cache_status: coverState?.status ?? (bookEntry.cover_url ? "uncached" : "missing"),
-        };
-      }),
-    [libraryBooks, coverStateByBookId],
-  );
 
   const openBook = (nextBook) => {
     setBook(nextBook);
@@ -620,10 +308,16 @@ const App = () => {
       try {
         const cachedBook = await getCachedFullBook(bookId);
         if (cachedBook) {
+          logImageEvent("full_book:cache_hit", {
+            book_id: bookId,
+          });
           openBook(cachedBook);
           return;
         }
 
+        logImageEvent("full_book:cache_miss", {
+          book_id: bookId,
+        });
         const completeBookData = await fetchAndBuildFullBook(bookId);
         openBook(completeBookData);
         upsertBookInLibrary(completeBookData);
@@ -633,6 +327,10 @@ const App = () => {
           `App.js::handleSelectBook(): Failed to get book ID ${bookId} with error`,
           error,
         );
+        logImageEvent("full_book:open_error", {
+          book_id: bookId,
+          error,
+        });
         setBook(null);
         alert("Error fetching the book. Please try again.");
       } finally {
@@ -662,7 +360,7 @@ const App = () => {
         loading={loading}
       />
       <BookList
-        books={hydratedLibraryBooks}
+        books={libraryBooks}
         loading={libraryLoading && libraryBooks.length === 0}
         error={libraryError && libraryBooks.length === 0}
         onRetry={() => fetchLibraryBooks({ force: true })}
@@ -680,7 +378,7 @@ const App = () => {
   );
 };
 
-  const styles = {
+const styles = {
   container: {
     minHeight: "100vh",
     padding: "32px 20px 48px",

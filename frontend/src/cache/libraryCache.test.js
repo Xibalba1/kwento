@@ -74,7 +74,9 @@ const createFakeIndexedDb = () => {
   };
 };
 
-describe("libraryCache shelf cover identity", () => {
+const makeArrayBuffer = (value) => Uint8Array.from(value.split("").map((char) => char.charCodeAt(0))).buffer;
+
+describe("libraryCache full-book persistence", () => {
   let libraryCache;
   let createObjectUrlCount;
 
@@ -89,49 +91,104 @@ describe("libraryCache shelf cover identity", () => {
     });
     global.URL.revokeObjectURL = jest.fn();
     window.indexedDB = createFakeIndexedDb();
+    window.localStorage.clear();
 
     libraryCache = require("./libraryCache");
   });
 
-  test("reuses a cached shelf cover even when the presigned URL changes", async () => {
-    const blob = new Blob(["cover-bytes"]);
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      blob: async () => blob,
+  test("saves and rehydrates a full book package using ArrayBuffer asset records", async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => makeArrayBuffer("cover-bytes"),
+        headers: { get: () => "image/png" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => makeArrayBuffer("page-bytes"),
+        headers: { get: () => "image/png" },
+      });
+
+    await libraryCache.saveFullBookPackage({
+      book_id: "book-1",
+      book_title: "Cached Book",
+      cover_url: "https://example.com/cover.png",
+      images: [
+        {
+          page: 1,
+          url: "https://example.com/page-1.png",
+        },
+      ],
+      pages: [
+        {
+          page_number: 1,
+          content: {
+            text_content_of_this_page: "Page one",
+          },
+        },
+      ],
     });
 
-    const firstObjectUrl = await libraryCache.cacheShelfCover({
-      bookId: "book-1",
-      sourceUrl: "https://example.com/cover.png?sig=one",
-    });
-    const secondObjectUrl = await libraryCache.cacheShelfCover({
-      bookId: "book-1",
-      sourceUrl: "https://example.com/cover.png?sig=two",
-    });
+    const cachedBook = await libraryCache.getCachedFullBook("book-1");
 
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(firstObjectUrl).toBe("blob:generated-1");
-    expect(secondObjectUrl).toBe("blob:generated-2");
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(cachedBook.cover_url).toBe("blob:generated-1");
+    expect(cachedBook.images[0].url).toBe("blob:generated-2");
+    expect(cachedBook.__cachedObjectUrls).toEqual(["blob:generated-1", "blob:generated-2"]);
   });
 
-  test("treats a rotated presigned URL as a cache hit for lookup helpers", async () => {
-    const blob = new Blob(["cover-bytes"]);
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      blob: async () => blob,
+  test("keeps shelf metadata in localStorage with a 7 day freshness window", async () => {
+    const saved = await libraryCache.saveShelfMetadata([
+      {
+        book_id: "book-meta",
+        book_title: "Metadata Book",
+      },
+    ]);
+
+    expect(saved.version).toBe(1);
+    expect(saved.expiresAt - saved.updatedAt).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(libraryCache.loadShelfMetadataSync()).toEqual(saved);
+  });
+
+  test("evicts expired and least-recently-used full book packages under the budget", async () => {
+    const nowSpy = jest.spyOn(Date, "now");
+    nowSpy.mockReturnValue(1_000);
+
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => makeArrayBuffer("a".repeat(5_000)),
+        headers: { get: () => "image/png" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => makeArrayBuffer("b".repeat(16)),
+        headers: { get: () => "image/png" },
+      });
+
+    await libraryCache.saveFullBookPackage({
+      book_id: "older-book",
+      book_title: "Older Book",
+      cover_url: "https://example.com/older-cover.png",
+      images: [],
+      pages: [],
     });
 
-    await libraryCache.cacheShelfCover({
-      bookId: "book-2",
-      sourceUrl: "https://example.com/cover.png?sig=one",
+    nowSpy.mockReturnValue(2_000);
+
+    await libraryCache.saveFullBookPackage({
+      book_id: "newer-book",
+      book_title: "Newer Book",
+      cover_url: "https://example.com/newer-cover.png",
+      images: [],
+      pages: [],
     });
 
-    await expect(
-      libraryCache.hasCachedShelfCover("book-2", "https://example.com/cover.png?sig=two"),
-    ).resolves.toBe(true);
+    await libraryCache.enforceCacheBudget({ maxBytes: 1_000 });
 
-    await expect(
-      libraryCache.getCachedShelfCover("book-2", "https://example.com/cover.png?sig=three"),
-    ).resolves.toBe("blob:generated-2");
+    await expect(libraryCache.getCachedFullBook("older-book")).resolves.toBeNull();
+    await expect(libraryCache.getCachedFullBook("newer-book")).resolves.not.toBeNull();
+
+    nowSpy.mockRestore();
   });
 });

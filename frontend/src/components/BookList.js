@@ -11,7 +11,7 @@ const TAB_HEIGHT = 52;
 const TAB_BAR_OVERLAP = 8;
 const ACTIVE_TAB_BRIDGE_HEIGHT = 12;
 
-const BookCoverImage = ({ bookId, coverUrl, cacheStatus, bookTitle, onSizeChange }) => {
+const BookCoverImage = ({ bookId, coverUrl, sourceKind, bookTitle, onSizeChange }) => {
   const [isVisible, setIsVisible] = useState(Boolean(coverUrl));
   const imageRef = useRef(null);
 
@@ -39,26 +39,26 @@ const BookCoverImage = ({ bookId, coverUrl, cacheStatus, bookTitle, onSizeChange
     logImageEvent("img:prop_change", {
       book_id: bookId,
       render_cover_url: coverUrl,
-      cover_cache_status: cacheStatus,
+      source_kind: sourceKind,
       is_visible: Boolean(coverUrl),
     });
-  }, [bookId, cacheStatus, coverUrl]);
+  }, [bookId, coverUrl, sourceKind]);
 
   useEffect(() => {
     logImageEvent("img:component_mount", {
       book_id: bookId,
       render_cover_url: coverUrl,
-      cover_cache_status: cacheStatus,
+      source_kind: sourceKind,
     });
 
     return () => {
       logImageEvent("img:component_unmount", {
         book_id: bookId,
         render_cover_url: coverUrl,
-        cover_cache_status: cacheStatus,
+        source_kind: sourceKind,
       });
     };
-  }, [bookId, cacheStatus, coverUrl]);
+  }, [bookId, coverUrl, sourceKind]);
 
   if (!coverUrl || !isVisible) {
     return null;
@@ -75,7 +75,7 @@ const BookCoverImage = ({ bookId, coverUrl, cacheStatus, bookTitle, onSizeChange
           logImageEvent("img:load", {
             book_id: bookId,
             render_cover_url: coverUrl,
-            cover_cache_status: cacheStatus,
+            source_kind: sourceKind,
             snapshot: buildImageSnapshot(),
           });
           onSizeChange();
@@ -84,7 +84,7 @@ const BookCoverImage = ({ bookId, coverUrl, cacheStatus, bookTitle, onSizeChange
           logImageEvent("img:error", {
             book_id: bookId,
             render_cover_url: coverUrl,
-            cover_cache_status: cacheStatus,
+            source_kind: sourceKind,
             snapshot: buildImageSnapshot(),
             page: getImageDebugPageContext(),
           });
@@ -267,8 +267,8 @@ const BookList = ({
               <div style={styles.coverSlot}>
                 <BookCoverImage
                   bookId={book.book_id}
-                  coverUrl={book.render_cover_url}
-                  cacheStatus={book.cover_cache_status}
+                  coverUrl={book.cover_url}
+                  sourceKind="remote"
                   bookTitle={book.book_title}
                   onSizeChange={handleSizeChange}
                 />
