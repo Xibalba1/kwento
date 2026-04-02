@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import ThemeInput from "./components/ThemeInput";
 import BookModal from "./components/BookModal";
 import BookList from "./components/BookList";
@@ -23,6 +23,19 @@ const releaseObjectUrls = (urls = []) => {
     }
   });
 };
+
+const sortBooksByTitle = (books = []) =>
+  [...books].sort((left, right) => left.book_title.localeCompare(right.book_title));
+
+const normalizeBook = (bookData = {}) => ({
+  ...bookData,
+  book_id: bookData.book_id,
+  book_title: bookData.book_title,
+  json_url: bookData.json_url,
+  cover_url: bookData.cover_url ?? bookData.cover?.url ?? null,
+  images: bookData.images ?? [],
+  is_archived: Boolean(bookData.is_archived),
+});
 
 const App = () => {
   const [theme, setTheme] = useState("");
@@ -57,19 +70,6 @@ const App = () => {
     }
   };
 
-  const sortBooksByTitle = (books = []) =>
-    [...books].sort((left, right) => left.book_title.localeCompare(right.book_title));
-
-  const normalizeBook = (bookData = {}) => ({
-    ...bookData,
-    book_id: bookData.book_id,
-    book_title: bookData.book_title,
-    json_url: bookData.json_url,
-    cover_url: bookData.cover_url ?? bookData.cover?.url ?? null,
-    images: bookData.images ?? [],
-    is_archived: Boolean(bookData.is_archived),
-  });
-
   const upsertBookInLibrary = (bookData) => {
     if (!bookData?.book_id) {
       return;
@@ -92,7 +92,7 @@ const App = () => {
     });
   };
 
-  const fetchLibraryBooks = async ({ force = false } = {}) => {
+  const fetchLibraryBooks = useCallback(async ({ force = false } = {}) => {
     if (libraryFetchPromiseRef.current && !force) {
       return libraryFetchPromiseRef.current;
     }
@@ -141,7 +141,7 @@ const App = () => {
     } finally {
       libraryFetchPromiseRef.current = null;
     }
-  };
+  }, []);
 
   const fetchAndBuildFullBook = async (bookId) => {
     const response = await fetch(buildApiUrl(`/books/${bookId}/`), {
@@ -183,7 +183,7 @@ const App = () => {
     }
 
     fetchLibraryBooks();
-  }, []);
+  }, [fetchLibraryBooks]);
 
   useEffect(() => {
     const logLifecycleEvent = (eventName) => {
