@@ -15,6 +15,7 @@ from api.models.book_models import (
     Book,
     BookResponse,
     BookCreateRequest,
+    ArchiveBookRequest,
     CoverResponse,
     ImageResponse,
 )
@@ -28,6 +29,7 @@ from utils.general_utils import (
     get_book_by_id,
     read_json_file,
     generate_presigned_url,
+    save_book_library_state,
 )
 
 
@@ -89,6 +91,7 @@ async def create_book(book_request: BookCreateRequest):
             book_title=book.book_title,
             expires_at=expires_at,
             json_url=json_url,
+            is_archived=False,
             cover=(
                 CoverResponse(
                     url=book.cover["url"],
@@ -347,3 +350,29 @@ async def fetch_book_by_id(book_id: str):
     except Exception as e:
         logger.exception(f"Unexpected error fetching book: {e}")
         raise HTTPException(status_code=500, detail="Error fetching book.")
+
+
+@router.patch("/{book_id}/archive/", response_model=BookResponse)
+async def update_book_archive_state(book_id: str, archive_request: ArchiveBookRequest):
+    """
+    Updates archive state for a specific book.
+    """
+    logger.info(
+        "Received request to update archive state for book_id=%s is_archived=%s",
+        book_id,
+        archive_request.is_archived,
+    )
+    try:
+        get_book_by_id(book_id)
+        save_book_library_state(book_id, archive_request.is_archived)
+        return get_book_by_id(book_id)
+    except ValueError as e:
+        logger.error(str(e))
+        raise HTTPException(status_code=404, detail="Book not found.")
+    except Exception as e:
+        logger.exception(
+            "Unexpected error updating archive state for book_id=%s: %s",
+            book_id,
+            e,
+        )
+        raise HTTPException(status_code=500, detail="Error updating archive state.")

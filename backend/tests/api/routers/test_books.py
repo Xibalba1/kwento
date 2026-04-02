@@ -64,3 +64,51 @@ async def test_create_book_non_timeout_failure_preserves_current_behavior(
 
     assert response.status_code == 500
     assert "request_id=" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+@patch("src.api.routers.books.get_book_by_id")
+@patch("src.api.routers.books.save_book_library_state")
+async def test_patch_archive_updates_archive_state(
+    mock_save_book_library_state,
+    mock_get_book_by_id,
+):
+    mock_get_book_by_id.side_effect = [
+        {
+            "book_id": "book-1",
+            "book_title": "Archive Book",
+            "json_url": "https://example.com/book-1.json",
+            "expires_at": "2026-04-02T00:00:00Z",
+            "cover": None,
+            "images": [],
+            "is_archived": False,
+        },
+        {
+            "book_id": "book-1",
+            "book_title": "Archive Book",
+            "json_url": "https://example.com/book-1.json",
+            "expires_at": "2026-04-02T00:00:00Z",
+            "cover": None,
+            "images": [],
+            "is_archived": True,
+        },
+    ]
+
+    async with _test_client() as client:
+        response = await client.patch("/books/book-1/archive/", json={"is_archived": True})
+
+    assert response.status_code == 200
+    assert response.json()["is_archived"] is True
+    mock_save_book_library_state.assert_called_once_with("book-1", True)
+
+
+@pytest.mark.asyncio
+@patch("src.api.routers.books.get_book_by_id")
+async def test_patch_archive_returns_404_for_missing_book(mock_get_book_by_id):
+    mock_get_book_by_id.side_effect = ValueError("missing")
+
+    async with _test_client() as client:
+        response = await client.patch("/books/missing/archive/", json={"is_archived": True})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Book not found."

@@ -199,9 +199,14 @@ class BookResponse(BaseModel):
     expires_at: datetime  # Expiration timestamp for the JSON URL
     json_url: str  # Pre-signed URL for the book's JSON metadata
     cover: Optional[CoverResponse] = None
+    is_archived: bool = False
     images: List[
         ImageResponse
     ]  # List of images with their URLs and expiration metadata
+
+
+class ArchiveBookRequest(BaseModel):
+    is_archived: bool
 
 
 # Add the following lines to resolve forward references
