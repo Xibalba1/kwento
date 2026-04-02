@@ -48,6 +48,7 @@ def get_logger(module_name):
 logger = get_logger(__name__)
 _GCS_CLIENT = None
 _GCS_CLIENT_LOCK = threading.Lock()
+BOOK_METADATA_FILENAME = "metadata.json"
 
 
 def get_project_root() -> Path:
@@ -316,6 +317,54 @@ def write_json_file(
         return str(local_path)
 
 
+def _default_book_library_state(book_id: str) -> Dict[str, Any]:
+    return {
+        "book_id": str(book_id),
+        "is_archived": False,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def get_book_library_state(book_id: str) -> Dict[str, Any]:
+    relative_path = construct_storage_path(str(book_id))
+    try:
+        state = read_json_file(BOOK_METADATA_FILENAME, relative_path=relative_path)
+    except FileNotFoundError:
+        return _default_book_library_state(book_id)
+    except Exception as e:
+        if settings.use_cloud_storage and getattr(e, "code", None) == 404:
+            return _default_book_library_state(book_id)
+        logger.warning("Failed to load book library state for book_id=%s: %s", book_id, e)
+        return _default_book_library_state(book_id)
+
+    return {
+        "book_id": str(book_id),
+        "is_archived": bool(state.get("is_archived", False)),
+        "updated_at": state.get("updated_at")
+        or datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def save_book_library_state(book_id: str, is_archived: bool) -> Dict[str, Any]:
+    relative_path = construct_storage_path(str(book_id))
+    state = {
+        "book_id": str(book_id),
+        "is_archived": bool(is_archived),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    write_json_file(
+        file_name=BOOK_METADATA_FILENAME,
+        data=state,
+        relative_path=relative_path,
+        metadata={
+            "artifact_type": "book_metadata",
+            "book_id": str(book_id),
+            "is_archived": str(bool(is_archived)).lower(),
+        },
+    )
+    return state
+
+
 def read_json_file(file_name: str, relative_path: str = "local_data") -> dict:
     """
     Reads JSON data from a file, either locally or in GCS, based on settings.
@@ -392,7 +441,7 @@ def construct_storage_path(relative_path: str) -> str:
             raise ValueError("GCS bucket name is not configured in settings.")
         return relative_path
     else:
-        return str(Path("local_data") / relative_path)
+        return str(Path(settings.local_data_path) / relative_path)
 
 
 def get_book_list() -> List[Dict[str, Any]]:
@@ -407,6 +456,7 @@ def get_book_list() -> List[Dict[str, Any]]:
         try:
             client = get_gcs_client()
             bucket = client.bucket(settings.gcs_bucket_name)
+            library_state_by_book_id = {}
 
             # List all blobs
             blobs = bucket.list_blobs()
@@ -420,6 +470,23 @@ def get_book_list() -> List[Dict[str, Any]]:
                 # Process JSON files
                 if blob_name.endswith(".json"):
                     parts = blob_name.split("/")
+                    if len(parts) == 2 and parts[1] == BOOK_METADATA_FILENAME:
+                        book_id = parts[0]
+                        try:
+                            state = read_json_file(BOOK_METADATA_FILENAME, relative_path=book_id)
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to load library state for book_id=%s from %s: %s",
+                                book_id,
+                                blob_name,
+                                e,
+                            )
+                        else:
+                            library_state_by_book_id[book_id] = bool(
+                                state.get("is_archived", False)
+                            )
+                        continue
+
                     if len(parts) != 2 or parts[1] != f"{parts[0]}.json":
                         continue
 
@@ -448,11 +515,16 @@ def get_book_list() -> List[Dict[str, Any]]:
                                 "cover_url": None,
                                 "cover_expires_at": None,
                                 "images": [],
+                                "is_archived": library_state_by_book_id.get(book_id, False),
                             }
                         else:
                             # Update json_url and book_title if needed
                             books_dict[book_id]["json_url"] = json_url
                             books_dict[book_id]["book_title"] = book_title
+                            books_dict[book_id]["is_archived"] = library_state_by_book_id.get(
+                                book_id,
+                                books_dict[book_id].get("is_archived", False),
+                            )
                     else:
                         logger.error(f"Missing metadata for blob {blob_name}")
 
@@ -472,6 +544,7 @@ def get_book_list() -> List[Dict[str, Any]]:
                                 "cover_url": cover_url,
                                 "cover_expires_at": expires_at,
                                 "images": [],
+                                "is_archived": library_state_by_book_id.get(book_id, False),
                             }
                         else:
                             books_dict[book_id]["cover_url"] = cover_url
@@ -500,6 +573,7 @@ def get_book_list() -> List[Dict[str, Any]]:
                                 "cover_url": None,
                                 "cover_expires_at": None,
                                 "images": [],
+                                "is_archived": library_state_by_book_id.get(book_id, False),
                             }
 
                         # Add image to the book's images
@@ -520,6 +594,9 @@ def get_book_list() -> List[Dict[str, Any]]:
             # Optional: Sort images by page number for each book
             for book in books_list:
                 book["images"].sort(key=lambda x: x["page"])
+                book["is_archived"] = bool(
+                    library_state_by_book_id.get(book["book_id"], book.get("is_archived", False))
+                )
 
             return books_list
 
@@ -553,7 +630,8 @@ def get_book_list() -> List[Dict[str, Any]]:
                 # Read the JSON file using the utility function
                 try:
                     book_data = read_json_file(
-                        book_json_path.name, relative_path=book_dir.name
+                        book_json_path.name,
+                        relative_path=construct_storage_path(book_dir.name),
                     )
                 except Exception as e:
                     logger.error(f"Error loading JSON for {book_json_path}: {e}")
@@ -589,6 +667,10 @@ def get_book_list() -> List[Dict[str, Any]]:
                             if isinstance(page_data, dict)
                             and isinstance(page_data.get("page_number"), int)
                         ],
+                        "is_archived": get_book_library_state(str(book_data["book_id"])).get(
+                            "is_archived",
+                            False,
+                        ),
                     }
                 )
         except Exception as e:
@@ -671,6 +753,7 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
                 "expires_at": expires_at,
                 "cover": cover,
                 "images": images,
+                "is_archived": get_book_library_state(book_id).get("is_archived", False),
             }
         else:
             # Use local storage logic
@@ -689,7 +772,10 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
                 raise ValueError(f"No metadata file found for book ID {book_id}.")
 
             try:
-                book_data = read_json_file(book_json_path.name, relative_path=book_id)
+                book_data = read_json_file(
+                    book_json_path.name,
+                    relative_path=construct_storage_path(book_id),
+                )
             except Exception as e:
                 raise ValueError(f"Error reading JSON for {book_json_path}: {e}")
 
@@ -725,6 +811,7 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
                 "expires_at": expires_at,
                 "cover": cover,
                 "images": images,
+                "is_archived": get_book_library_state(book_id).get("is_archived", False),
             }
 
     except ValueError as e:

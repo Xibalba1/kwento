@@ -11,6 +11,38 @@ const TAB_HEIGHT = 52;
 const TAB_BAR_OVERLAP = 8;
 const ACTIVE_TAB_BRIDGE_HEIGHT = 12;
 
+const usePrefersReducedMotion = () => {
+  const getPreference = () =>
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(getPreference);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const handleChange = (event) => {
+      setPrefersReducedMotion(event.matches);
+    };
+
+    setPrefersReducedMotion(mediaQuery.matches);
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    }
+
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
+  }, []);
+
+  return prefersReducedMotion;
+};
+
 const BookCoverImage = ({ bookId, coverUrl, sourceKind, bookTitle, onSizeChange }) => {
   const [isVisible, setIsVisible] = useState(Boolean(coverUrl));
   const imageRef = useRef(null);
@@ -103,15 +135,23 @@ const BookList = ({
   onRetry,
   onSelectBook,
   onVisibleBooksChange,
+  onToggleArchive = () => {},
+  archiveActionBookIds = [],
 }) => {
   const buttonRefs = useRef({});
   const itemRefs = useRef({});
   const [maxButtonHeight, setMaxButtonHeight] = useState(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
   const [activeTab, setActiveTab] = useState(BOOK_SHELF_TAB);
+  const [flippedBookId, setFlippedBookId] = useState(null);
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const pendingArchiveBookIds = new Set(archiveActionBookIds);
+  const visibleBooks = books.filter((book) =>
+    activeTab === BOOK_SHELF_TAB ? !book.is_archived : book.is_archived,
+  );
 
   useLayoutEffect(() => {
-    if (activeTab !== BOOK_SHELF_TAB || books.length === 0) {
+    if (activeTab !== BOOK_SHELF_TAB || visibleBooks.length === 0) {
       setMaxButtonHeight(null);
       return;
     }
@@ -132,7 +172,7 @@ const BookList = ({
     setMaxButtonHeight((currentHeight) =>
       currentHeight === tallestHeight ? currentHeight : tallestHeight,
     );
-  }, [activeTab, books, layoutVersion]);
+  }, [activeTab, books, layoutVersion, visibleBooks.length]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -146,17 +186,47 @@ const BookList = ({
   }, []);
 
   useEffect(() => {
+    setLayoutVersion((currentVersion) => currentVersion + 1);
+  }, [activeTab, books.length]);
+
+  useEffect(() => {
+    if (!flippedBookId) {
+      return undefined;
+    }
+
+    const closeOnOutsidePointer = (event) => {
+      const container = itemRefs.current[flippedBookId];
+      if (!container || container.contains(event.target)) {
+        return;
+      }
+      setFlippedBookId(null);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+    };
+  }, [flippedBookId]);
+
+  useEffect(() => {
+    if (flippedBookId && !visibleBooks.some((book) => book.book_id === flippedBookId)) {
+      setFlippedBookId(null);
+    }
+  }, [flippedBookId, visibleBooks]);
+
+  useEffect(() => {
     if (typeof onVisibleBooksChange !== "function") {
       return undefined;
     }
 
-    if (activeTab !== BOOK_SHELF_TAB || books.length === 0) {
+    if (activeTab !== BOOK_SHELF_TAB || visibleBooks.length === 0) {
       onVisibleBooksChange([]);
       return undefined;
     }
 
     if (typeof window === "undefined" || typeof window.IntersectionObserver !== "function") {
-      onVisibleBooksChange(books.slice(0, 6).map((book) => book.book_id));
+      onVisibleBooksChange(visibleBooks.slice(0, 6).map((book) => book.book_id));
       return undefined;
     }
 
@@ -194,7 +264,7 @@ const BookList = ({
       },
     );
 
-    books.forEach((book) => {
+    visibleBooks.forEach((book) => {
       const element = itemRefs.current[book.book_id];
       if (element) {
         observer.observe(element);
@@ -208,6 +278,17 @@ const BookList = ({
 
   const handleSizeChange = () => {
     setLayoutVersion((currentVersion) => currentVersion + 1);
+  };
+
+  const handleFlipToggle = (event, bookId) => {
+    event.stopPropagation();
+    setFlippedBookId((currentId) => (currentId === bookId ? null : bookId));
+  };
+
+  const handleArchiveAction = (event, book) => {
+    event.stopPropagation();
+    setFlippedBookId(null);
+    onToggleArchive(book.book_id, !book.is_archived);
   };
 
   const renderContent = () => {
@@ -226,13 +307,22 @@ const BookList = ({
       );
     }
 
-    if (activeTab === ARCHIVE_TAB) {
-      return <p style={{ ...styles.message, ...styles.archiveMessage }}>Archive is empty</p>;
+    if (visibleBooks.length === 0) {
+      return (
+        <p
+          style={{
+            ...styles.message,
+            ...(activeTab === ARCHIVE_TAB ? styles.archiveMessage : {}),
+          }}
+        >
+          {activeTab === ARCHIVE_TAB ? "Archive is empty" : "Book Shelf is empty"}
+        </p>
+      );
     }
 
     return (
       <ul style={styles.list}>
-        {books.map((book) => (
+        {visibleBooks.map((book) => (
           <li
             key={book.book_id}
             style={styles.listItem}
@@ -246,34 +336,112 @@ const BookList = ({
               delete itemRefs.current[book.book_id];
             }}
           >
-            <button
-              ref={(element) => {
-                if (element) {
-                  buttonRefs.current[book.book_id] = element;
-                  return;
-                }
-
-                delete buttonRefs.current[book.book_id];
-              }}
+            <div
               style={{
-                ...styles.bookButton,
-                height: maxButtonHeight ? `${maxButtonHeight}px` : "auto",
-              }}
-              onClick={() => {
-                onSelectBook(book.book_id);
+                ...styles.card,
+                ...(prefersReducedMotion ? styles.cardReducedMotion : {}),
               }}
             >
-              <span style={styles.bookTitle}>{book.book_title}</span>
-              <div style={styles.coverSlot}>
-                <BookCoverImage
-                  bookId={book.book_id}
-                  coverUrl={book.cover_url}
-                  sourceKind="remote"
-                  bookTitle={book.book_title}
-                  onSizeChange={handleSizeChange}
-                />
+              <div
+                style={{
+                  ...styles.cardInner,
+                  ...(flippedBookId === book.book_id
+                    ? prefersReducedMotion
+                      ? styles.cardInnerReducedMotionFlipped
+                      : styles.cardInnerFlipped
+                    : {}),
+                  height: maxButtonHeight ? `${maxButtonHeight}px` : "auto",
+                }}
+              >
+                <div
+                  style={{
+                    ...styles.cardFace,
+                    ...styles.cardFront,
+                    ...(prefersReducedMotion
+                      ? flippedBookId === book.book_id
+                        ? styles.hiddenFaceReducedMotion
+                        : styles.visibleFaceReducedMotion
+                      : {}),
+                  }}
+                >
+                  <button
+                    ref={(element) => {
+                      if (element) {
+                        buttonRefs.current[book.book_id] = element;
+                        return;
+                      }
+
+                      delete buttonRefs.current[book.book_id];
+                    }}
+                    type="button"
+                    aria-label={book.book_title}
+                    style={{
+                      ...styles.bookButton,
+                      height: maxButtonHeight ? `${maxButtonHeight}px` : "auto",
+                    }}
+                    onClick={() => {
+                      onSelectBook(book.book_id);
+                    }}
+                  >
+                    <span style={styles.bookTitle}>{book.book_title}</span>
+                    <div style={styles.coverSlot}>
+                      <BookCoverImage
+                        bookId={book.book_id}
+                        coverUrl={book.cover_url}
+                        sourceKind="remote"
+                        bookTitle={book.book_title}
+                        onSizeChange={handleSizeChange}
+                      />
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`More actions for ${book.book_title}`}
+                    style={styles.frontActionButton}
+                    onClick={(event) => handleFlipToggle(event, book.book_id)}
+                  >
+                    <span style={styles.materialSymbol}>more_vert</span>
+                  </button>
+                </div>
+                <div
+                  aria-hidden={flippedBookId !== book.book_id}
+                  style={{
+                    ...styles.cardFace,
+                    ...styles.cardBack,
+                    ...(prefersReducedMotion ? styles.cardBackReducedMotion : {}),
+                    ...(prefersReducedMotion
+                      ? flippedBookId === book.book_id
+                        ? styles.visibleFaceReducedMotion
+                        : styles.hiddenFaceReducedMotion
+                      : {}),
+                  }}
+                >
+                  <button
+                    type="button"
+                    aria-label={`Return to cover for ${book.book_title}`}
+                    style={styles.backActionButton}
+                    onClick={(event) => handleFlipToggle(event, book.book_id)}
+                  >
+                    <span style={styles.materialSymbol}>undo</span>
+                  </button>
+                  <div style={styles.backContent}>
+                    <p style={styles.backTitle}>{book.book_title}</p>
+                    <button
+                      type="button"
+                      style={styles.menuActionButton}
+                      disabled={pendingArchiveBookIds.has(book.book_id)}
+                      onClick={(event) => handleArchiveAction(event, book)}
+                    >
+                      {pendingArchiveBookIds.has(book.book_id)
+                        ? "Saving..."
+                        : book.is_archived
+                          ? "Restore to Book Shelf"
+                          : "Move to Archive"}
+                    </button>
+                  </div>
+                </div>
               </div>
-            </button>
+            </div>
           </li>
         ))}
       </ul>
@@ -439,6 +607,49 @@ const styles = {
   listItem: {
     display: "flex",
   },
+  card: {
+    position: "relative",
+    width: "100%",
+    perspective: "1200px",
+  },
+  cardReducedMotion: {
+    perspective: "none",
+  },
+  cardInner: {
+    position: "relative",
+    width: "100%",
+    transformStyle: "preserve-3d",
+    transition: "transform 320ms cubic-bezier(0.22, 1, 0.36, 1)",
+  },
+  cardInnerFlipped: {
+    transform: "rotateY(180deg)",
+  },
+  cardInnerReducedMotionFlipped: {
+    transform: "none",
+  },
+  cardFace: {
+    width: "100%",
+    boxSizing: "border-box",
+    backfaceVisibility: "hidden",
+    borderRadius: "14px",
+  },
+  visibleFaceReducedMotion: {
+    opacity: 1,
+    visibility: "visible",
+    position: "relative",
+    transition: "opacity 180ms ease",
+  },
+  hiddenFaceReducedMotion: {
+    opacity: 0,
+    visibility: "hidden",
+    position: "absolute",
+    inset: 0,
+    pointerEvents: "none",
+    transition: "opacity 180ms ease",
+  },
+  cardFront: {
+    position: "relative",
+  },
   bookButton: {
     display: "flex",
     alignItems: "center",
@@ -455,6 +666,26 @@ const styles = {
     textAlign: "center",
     boxShadow: "rgba(0, 0, 0, 0.15) 1.95px 1.95px 2.6px",
     gap: "8px",
+    position: "relative",
+    outline: "none",
+  },
+  frontActionButton: {
+    position: "absolute",
+    top: "10px",
+    right: "10px",
+    width: "42px",
+    height: "42px",
+    border: "none",
+    borderRadius: "999px",
+    backgroundColor: "rgba(202, 5, 77, 0.3)",
+    color: "#FFFCF0",
+    backdropFilter: "blur(4px)",
+    WebkitBackdropFilter: "blur(4px)",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 2,
   },
   bookTitle: {
     fontSize: "20px",
@@ -487,6 +718,69 @@ const styles = {
     height: "100%",
     display: "block",
     objectFit: "cover",
+  },
+  cardBack: {
+    position: "absolute",
+    inset: 0,
+    minHeight: "220px",
+    padding: "18px",
+    background:
+      "linear-gradient(160deg, rgba(255, 244, 196, 0.98), rgba(255, 225, 129, 0.98))",
+    boxShadow: "rgba(0, 0, 0, 0.15) 1.95px 1.95px 2.6px",
+    transform: "rotateY(180deg)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardBackReducedMotion: {
+    transform: "none",
+  },
+  backContent: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "18px",
+    width: "100%",
+  },
+  backTitle: {
+    margin: 0,
+    color: "#8A0033",
+    fontSize: "16px",
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  backActionButton: {
+    position: "absolute",
+    top: "10px",
+    right: "10px",
+    width: "42px",
+    height: "42px",
+    border: "none",
+    borderRadius: "999px",
+    backgroundColor: "#CA054D",
+    color: "#FFFCF0",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuActionButton: {
+    width: "100%",
+    maxWidth: "220px",
+    border: "none",
+    borderRadius: "14px",
+    padding: "14px 18px",
+    backgroundColor: "#CA054D",
+    color: "#FFCC00",
+    fontSize: "15px",
+    fontWeight: "700",
+    cursor: "pointer",
+  },
+  materialSymbol: {
+    fontFamily: '"Material Symbols Outlined"',
+    fontSize: "22px",
+    lineHeight: 1,
+    fontVariationSettings: '"FILL" 0, "wght" 500, "GRAD" 0, "opsz" 24',
   },
   message: {
     textAlign: "center",

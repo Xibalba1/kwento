@@ -20,6 +20,8 @@ jest.mock("./cache/libraryCache", () => ({
   saveShelfMetadata: (...args) => mockSaveShelfMetadata(...args),
 }));
 
+const exactName = (label) => new RegExp(`^${label}$`, "i");
+
 const createDeferred = () => {
   let resolvePromise;
   let rejectPromise;
@@ -65,6 +67,7 @@ test("renders the app header and library entry point", async () => {
       {
         book_id: "book-1",
         book_title: "Library Book",
+        is_archived: false,
       },
     ],
   });
@@ -76,7 +79,7 @@ test("renders the app header and library entry point", async () => {
   expect(screen.getByText("Kwento")).toBeInTheDocument();
   expect(screen.getByText("Make your story!")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /generate book/i })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /library book/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: exactName("Library Book") })).toBeInTheDocument();
 
   await waitFor(() => {
     expect(global.fetch).toHaveBeenCalledWith("http://localhost/books/", {
@@ -96,6 +99,7 @@ test("renders cached shelf metadata before the background refresh resolves", asy
           book_id: "cached-book-1",
           book_title: "Cached Shelf Book",
           cover_url: "https://example.com/cached-cover.png",
+          is_archived: false,
         },
       ],
       updatedAt: Date.now(),
@@ -110,7 +114,7 @@ test("renders cached shelf metadata before the background refresh resolves", asy
     render(<App />);
   });
 
-  expect(screen.getByRole("button", { name: /cached shelf book/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: exactName("Cached Shelf Book") })).toBeInTheDocument();
   expect(global.fetch).toHaveBeenCalledWith("http://localhost/books/", {
     method: "GET",
     headers: { "Content-Type": "application/json" },
@@ -123,13 +127,14 @@ test("renders cached shelf metadata before the background refresh resolves", asy
         {
           book_id: "remote-book-1",
           book_title: "Remote Shelf Book",
+          is_archived: false,
         },
       ],
     });
   });
 
   await waitFor(() => {
-    expect(screen.getByRole("button", { name: /remote shelf book/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: exactName("Remote Shelf Book") })).toBeInTheDocument();
   });
 });
 
@@ -155,7 +160,7 @@ test("keeps cached shelf metadata visible when the background refresh fails", as
     render(<App />);
   });
 
-  expect(screen.getByRole("button", { name: /offline shelf book/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: exactName("Offline Shelf Book") })).toBeInTheDocument();
 
   await waitFor(() => {
     expect(global.fetch).toHaveBeenCalledWith("http://localhost/books/", {
@@ -165,7 +170,7 @@ test("keeps cached shelf metadata visible when the background refresh fails", as
   });
 
   expect(screen.queryByText(/error fetching books/i)).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /offline shelf book/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: exactName("Offline Shelf Book") })).toBeInTheDocument();
 });
 
 test("deduplicates repeated clicks while the same book is still opening", async () => {
@@ -179,6 +184,7 @@ test("deduplicates repeated clicks while the same book is still opening", async 
           book_id: "book-1",
           book_title: "Repeat Click Book",
           json_url: "https://example.com/book-1.json",
+          is_archived: false,
         },
       ],
     })
@@ -194,7 +200,7 @@ test("deduplicates repeated clicks while the same book is still opening", async 
     render(<App />);
   });
 
-  const bookButton = await screen.findByRole("button", { name: /repeat click book/i });
+  const bookButton = await screen.findByRole("button", { name: exactName("Repeat Click Book") });
 
   await act(async () => {
     fireEvent.click(bookButton);
@@ -217,6 +223,7 @@ test("deduplicates repeated clicks while the same book is still opening", async 
         book_title: "Repeat Click Book",
         json_url: "https://example.com/book-1.json",
         images: [],
+        is_archived: false,
       }),
     });
   });
@@ -254,6 +261,7 @@ test("revokes cached book object URLs when the modal closes, not when it opens",
         book_id: "book-2",
         book_title: "Cached Modal Book",
         json_url: "https://example.com/book-2.json",
+        is_archived: false,
       },
     ],
   });
@@ -262,7 +270,7 @@ test("revokes cached book object URLs when the modal closes, not when it opens",
     render(<App />);
   });
 
-  fireEvent.click(await screen.findByRole("button", { name: /cached modal book/i }));
+  fireEvent.click(await screen.findByRole("button", { name: exactName("Cached Modal Book") }));
 
   expect(await screen.findByRole("button", { name: /close modal/i })).toBeInTheDocument();
   expect(global.URL.revokeObjectURL).not.toHaveBeenCalled();
@@ -275,6 +283,90 @@ test("revokes cached book object URLs when the modal closes, not when it opens",
   });
 });
 
+test("prefers fresh detail asset URLs over stale book json asset URLs", async () => {
+  global.fetch
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        {
+          book_id: "book-fresh-assets",
+          book_title: "Fresh Assets Book",
+          cover_url: "https://example.com/fresh-shelf-cover.png",
+          is_archived: false,
+        },
+      ],
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        book_id: "book-fresh-assets",
+        book_title: "Fresh Assets Book",
+        json_url: "https://example.com/fresh-book.json",
+        cover: {
+          url: "https://example.com/fresh-detail-cover.png",
+        },
+        images: [
+          {
+            page: 1,
+            url: "https://example.com/fresh-page-1.png",
+          },
+        ],
+        is_archived: false,
+      }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        book_id: "book-fresh-assets",
+        book_title: "Fresh Assets Book",
+        cover: {
+          url: "https://example.com/stale-json-cover.png",
+        },
+        images: [
+          {
+            page: 1,
+            url: "https://example.com/stale-json-page-1.png",
+          },
+        ],
+        pages: [
+          {
+            page_number: 1,
+            content: {
+              text_content_of_this_page: "Fresh page text",
+            },
+          },
+        ],
+      }),
+    });
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  fireEvent.click(await screen.findByRole("button", { name: exactName("Fresh Assets Book") }));
+
+  await screen.findByRole("button", { name: /close modal/i });
+
+  await waitFor(() => {
+    expect(mockSaveFullBookPackage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        book_id: "book-fresh-assets",
+        json_url: "https://example.com/fresh-book.json",
+        cover_url: "https://example.com/fresh-detail-cover.png",
+        cover: expect.objectContaining({
+          url: "https://example.com/fresh-detail-cover.png",
+        }),
+        images: [
+          expect.objectContaining({
+            page: 1,
+            url: "https://example.com/fresh-page-1.png",
+          }),
+        ],
+      }),
+    );
+  });
+});
+
 test("renders shelf covers from the remote cover_url", async () => {
   global.fetch.mockResolvedValueOnce({
     ok: true,
@@ -283,6 +375,7 @@ test("renders shelf covers from the remote cover_url", async () => {
         book_id: "book-remote-cover",
         book_title: "Remote Cover Book",
         cover_url: "https://example.com/remote-cover.png",
+        is_archived: false,
       },
     ],
   });
@@ -294,4 +387,56 @@ test("renders shelf covers from the remote cover_url", async () => {
   const image = await screen.findByRole("img", { name: /cover for remote cover book/i });
   expect(image).toHaveAttribute("src", "https://example.com/remote-cover.png");
   expect(global.URL.createObjectURL).not.toHaveBeenCalled();
+});
+
+test("archives a shelf book and moves it to the archive tab", async () => {
+  global.fetch
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        {
+          book_id: "book-archive-1",
+          book_title: "Archive Candidate",
+          is_archived: false,
+        },
+      ],
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        book_id: "book-archive-1",
+        book_title: "Archive Candidate",
+        is_archived: true,
+        json_url: "https://example.com/book-archive-1.json",
+        images: [],
+      }),
+    });
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  await act(async () => {
+    fireEvent.click(await screen.findByRole("button", {
+      name: /more actions for archive candidate/i,
+    }));
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /move to archive/i }));
+  });
+
+  await waitFor(() => {
+    expect(global.fetch).toHaveBeenLastCalledWith("http://localhost/books/book-archive-1/archive/", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_archived: true }),
+    });
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("tab", { name: /archive/i }));
+  });
+
+  expect(await screen.findByRole("button", { name: exactName("Archive Candidate") })).toBeInTheDocument();
 });

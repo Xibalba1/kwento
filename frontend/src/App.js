@@ -33,6 +33,7 @@ const App = () => {
   const [libraryBooks, setLibraryBooks] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryError, setLibraryError] = useState(false);
+  const [archiveActionBookIds, setArchiveActionBookIds] = useState([]);
   const [, setVisibleBookIds] = useState([]);
   const libraryFetchPromiseRef = useRef(null);
   const cachedBookObjectUrlsRef = useRef([]);
@@ -56,6 +57,19 @@ const App = () => {
     }
   };
 
+  const sortBooksByTitle = (books = []) =>
+    [...books].sort((left, right) => left.book_title.localeCompare(right.book_title));
+
+  const normalizeBook = (bookData = {}) => ({
+    ...bookData,
+    book_id: bookData.book_id,
+    book_title: bookData.book_title,
+    json_url: bookData.json_url,
+    cover_url: bookData.cover_url ?? bookData.cover?.url ?? null,
+    images: bookData.images ?? [],
+    is_archived: Boolean(bookData.is_archived),
+  });
+
   const upsertBookInLibrary = (bookData) => {
     if (!bookData?.book_id) {
       return;
@@ -66,22 +80,15 @@ const App = () => {
         (existingBook) => existingBook.book_id === bookData.book_id,
       );
 
-      const normalizedBook = {
-        book_id: bookData.book_id,
-        book_title: bookData.book_title,
-        json_url: bookData.json_url,
-        cover_url: bookData.cover?.url ?? bookData.cover_url ?? null,
-        images: bookData.images ?? [],
-        ...bookData,
-      };
+      const normalizedBook = normalizeBook(bookData);
 
       if (existingIndex >= 0) {
         const nextBooks = [...previousBooks];
         nextBooks[existingIndex] = { ...nextBooks[existingIndex], ...normalizedBook };
-        return nextBooks;
+        return sortBooksByTitle(nextBooks);
       }
 
-      return [normalizedBook, ...previousBooks];
+      return sortBooksByTitle([normalizedBook, ...previousBooks]);
     });
   };
 
@@ -108,7 +115,9 @@ const App = () => {
         }
 
         const books = await response.json();
-        const normalizedBooks = Array.isArray(books) ? books : [];
+        const normalizedBooks = Array.isArray(books)
+          ? sortBooksByTitle(books.map((entry) => normalizeBook(entry)))
+          : [];
         setLibraryBooks(normalizedBooks);
         logImageEvent("shelf:fetch_success", {
           count: normalizedBooks.length,
@@ -155,8 +164,11 @@ const App = () => {
     return {
       ...data,
       ...bookData,
+      json_url: data.json_url,
+      cover: data.cover ?? bookData.cover ?? null,
       cover_url: data.cover?.url ?? data.cover_url ?? null,
       images: data.images ?? bookData.images ?? [],
+      is_archived: Boolean(data.is_archived ?? bookData.is_archived),
     };
   };
 
@@ -164,7 +176,7 @@ const App = () => {
     logImageEvent("app:mount", getImageDebugPageContext());
     const cachedMetadata = loadShelfMetadataSync();
     if (cachedMetadata?.books?.length) {
-      setLibraryBooks(cachedMetadata.books);
+      setLibraryBooks(sortBooksByTitle(cachedMetadata.books.map((entry) => normalizeBook(entry))));
       logImageEvent("shelf:metadata_hydrated", {
         count: cachedMetadata.books.length,
       });
@@ -272,6 +284,7 @@ const App = () => {
         ...data,
         ...bookData,
         cover_url: data.cover?.url ?? data.cover_url ?? null,
+        is_archived: Boolean(data.is_archived ?? bookData.is_archived),
       };
 
       openBook(completeBookData);
@@ -289,6 +302,76 @@ const App = () => {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setBook(null);
+  };
+
+  const handleToggleArchive = async (bookId, isArchived) => {
+    if (!bookId) {
+      return;
+    }
+
+    setArchiveActionBookIds((current) =>
+      current.includes(bookId) ? current : [...current, bookId],
+    );
+
+    const previousBook = libraryBooks.find((entry) => entry.book_id === bookId) ?? null;
+
+    setLibraryBooks((currentBooks) =>
+      sortBooksByTitle(
+        currentBooks.map((entry) =>
+          entry.book_id === bookId ? { ...entry, is_archived: isArchived } : entry,
+        ),
+      ),
+    );
+    setBook((currentBook) =>
+      currentBook?.book_id === bookId
+        ? { ...currentBook, is_archived: isArchived }
+        : currentBook,
+    );
+
+    try {
+      const response = await fetch(buildApiUrl(`/books/${bookId}/archive/`), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_archived: isArchived }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to update archive state. status=${response.status}`);
+      }
+
+      const updatedBook = normalizeBook(await response.json());
+      setLibraryBooks((currentBooks) =>
+        sortBooksByTitle(
+          currentBooks.map((entry) =>
+            entry.book_id === bookId ? { ...entry, ...updatedBook } : entry,
+          ),
+        ),
+      );
+      setBook((currentBook) =>
+        currentBook?.book_id === bookId
+          ? { ...currentBook, ...updatedBook }
+          : currentBook,
+      );
+    } catch (error) {
+      console.error(`Failed to update archive state for book ${bookId}:`, error);
+      if (previousBook) {
+        setLibraryBooks((currentBooks) =>
+          sortBooksByTitle(
+            currentBooks.map((entry) =>
+              entry.book_id === bookId ? { ...entry, ...previousBook } : entry,
+            ),
+          ),
+        );
+        setBook((currentBook) =>
+          currentBook?.book_id === bookId
+            ? { ...currentBook, ...previousBook }
+            : currentBook,
+        );
+      }
+      alert("Error updating archive state. Please try again.");
+    } finally {
+      setArchiveActionBookIds((current) => current.filter((entry) => entry !== bookId));
+    }
   };
 
   const handleSelectBook = async (bookId) => {
@@ -311,14 +394,14 @@ const App = () => {
           logImageEvent("full_book:cache_hit", {
             book_id: bookId,
           });
-          openBook(cachedBook);
+          openBook(normalizeBook(cachedBook));
           return;
         }
 
         logImageEvent("full_book:cache_miss", {
           book_id: bookId,
         });
-        const completeBookData = await fetchAndBuildFullBook(bookId);
+        const completeBookData = normalizeBook(await fetchAndBuildFullBook(bookId));
         openBook(completeBookData);
         upsertBookInLibrary(completeBookData);
         void cacheFullBookInBackground(completeBookData);
@@ -366,6 +449,8 @@ const App = () => {
         onRetry={() => fetchLibraryBooks({ force: true })}
         onSelectBook={handleSelectBook}
         onVisibleBooksChange={setVisibleBookIds}
+        onToggleArchive={handleToggleArchive}
+        archiveActionBookIds={archiveActionBookIds}
       />
 
       {isModalOpen && book && (

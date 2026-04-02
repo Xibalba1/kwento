@@ -32,6 +32,13 @@ const createBook = (overrides = {}) => ({
 });
 
 describe("BookModal", () => {
+  test("does not render archive actions inside the modal", () => {
+    render(<BookModal book={createBook({ is_archived: false })} onClose={jest.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /archive/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /restore/i })).not.toBeInTheDocument();
+  });
+
   test("shows only the placeholder until the current page image loads", () => {
     render(<BookModal book={createBook()} onClose={jest.fn()} />);
 
