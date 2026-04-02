@@ -274,7 +274,7 @@ const BookList = ({
     return () => {
       observer.disconnect();
     };
-  }, [activeTab, books, onVisibleBooksChange]);
+  }, [activeTab, onVisibleBooksChange, visibleBooks]);
 
   const handleSizeChange = () => {
     setLayoutVersion((currentVersion) => currentVersion + 1);
