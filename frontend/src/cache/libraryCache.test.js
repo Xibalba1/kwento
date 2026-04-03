@@ -142,12 +142,27 @@ describe("libraryCache full-book persistence", () => {
       {
         book_id: "book-meta",
         book_title: "Metadata Book",
+        remote_cover_url: "https://example.com/cover.png",
+        cover_url: "blob:cached-cover",
       },
     ]);
 
     expect(saved.version).toBe(1);
     expect(saved.expiresAt - saved.updatedAt).toBe(7 * 24 * 60 * 60 * 1000);
-    expect(libraryCache.loadShelfMetadataSync()).toEqual(saved);
+    expect(saved.books[0].cover_url).toBe("https://example.com/cover.png");
+    expect(libraryCache.loadShelfMetadataSync()).toEqual(
+      expect.objectContaining({
+        books: [
+          expect.objectContaining({
+            book_id: "book-meta",
+            book_title: "Metadata Book",
+            remote_cover_url: "https://example.com/cover.png",
+            cover_url: "https://example.com/cover.png",
+            cover_source_kind: "remote",
+          }),
+        ],
+      }),
+    );
   });
 
   test("suppresses stale cached shelf cover URLs while keeping metadata", async () => {
@@ -189,6 +204,179 @@ describe("libraryCache full-book persistence", () => {
     );
 
     nowSpy.mockRestore();
+  });
+
+  test("saves and rehydrates shelf cover bytes independently from shelf metadata", async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      arrayBuffer: async () => makeArrayBuffer("shelf-cover"),
+      headers: { get: () => "image/png" },
+    });
+
+    await libraryCache.saveShelfCover({
+      book_id: "shelf-book-1",
+      remote_cover_url: "https://example.com/shelf-cover.png",
+      remote_cover_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+
+    const covers = await libraryCache.getCachedShelfCovers([
+      {
+        book_id: "shelf-book-1",
+        remote_cover_url: "https://example.com/shelf-cover.png",
+      },
+    ]);
+
+    expect(covers.get("shelf-book-1")).toEqual(
+      expect.objectContaining({
+        objectUrl: "blob:generated-1",
+        sourceUrl: "https://example.com/shelf-cover.png",
+      }),
+    );
+  });
+
+  test("replaces cached shelf cover bytes when the source URL changes", async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => makeArrayBuffer("cover-a"),
+        headers: { get: () => "image/png" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => makeArrayBuffer("cover-b"),
+        headers: { get: () => "image/png" },
+      });
+
+    await libraryCache.saveShelfCover({
+      book_id: "shelf-book-2",
+      remote_cover_url: "https://example.com/cover-a.png",
+      remote_cover_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    await libraryCache.saveShelfCover({
+      book_id: "shelf-book-2",
+      remote_cover_url: "https://example.com/cover-b.png",
+      remote_cover_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+
+    const covers = await libraryCache.getCachedShelfCovers([
+      {
+        book_id: "shelf-book-2",
+        remote_cover_url: "https://example.com/cover-b.png",
+      },
+    ]);
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(covers.get("shelf-book-2")).toEqual(
+      expect.objectContaining({
+        objectUrl: "blob:generated-1",
+        sourceUrl: "https://example.com/cover-b.png",
+      }),
+    );
+  });
+
+  test("deletes cached shelf covers when the shelf entry no longer has a cover", async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      arrayBuffer: async () => makeArrayBuffer("cover-a"),
+      headers: { get: () => "image/png" },
+    });
+
+    await libraryCache.saveShelfCover({
+      book_id: "shelf-book-3",
+      remote_cover_url: "https://example.com/cover-a.png",
+      remote_cover_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    await libraryCache.deleteShelfCover("shelf-book-3");
+
+    const covers = await libraryCache.getCachedShelfCovers([
+      {
+        book_id: "shelf-book-3",
+      },
+    ]);
+
+    expect(covers.has("shelf-book-3")).toBe(false);
+  });
+
+  test("evicts expired and least-recently-used shelf covers under the shelf cover budget", async () => {
+    const nowSpy = jest.spyOn(Date, "now");
+    nowSpy.mockReturnValue(1_000);
+
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => makeArrayBuffer("a".repeat(8_000)),
+        headers: { get: () => "image/png" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => makeArrayBuffer("b".repeat(16)),
+        headers: { get: () => "image/png" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => makeArrayBuffer("cover"),
+        headers: { get: () => "image/png" },
+      });
+
+    await libraryCache.saveShelfCover({
+      book_id: "older-shelf-book",
+      remote_cover_url: "https://example.com/older-shelf-cover.png",
+      remote_cover_expires_at: new Date(1_000 + 60 * 60 * 1000).toISOString(),
+    });
+
+    nowSpy.mockReturnValue(2_000);
+
+    await libraryCache.saveShelfCover({
+      book_id: "newer-shelf-book",
+      remote_cover_url: "https://example.com/newer-shelf-cover.png",
+      remote_cover_expires_at: new Date(2_000 + 60 * 60 * 1000).toISOString(),
+    });
+
+    await libraryCache.saveFullBookPackage({
+      book_id: "full-book-safe",
+      book_title: "Full Book Safe",
+      cover_url: "https://example.com/full-book-cover.png",
+      images: [],
+      pages: [],
+    });
+
+    await libraryCache.enforceShelfCoverBudget({ maxBytes: 1_000 });
+
+    const shelfCovers = await libraryCache.getCachedShelfCovers([
+      {
+        book_id: "older-shelf-book",
+        remote_cover_url: "https://example.com/older-shelf-cover.png",
+      },
+      {
+        book_id: "newer-shelf-book",
+        remote_cover_url: "https://example.com/newer-shelf-cover.png",
+      },
+    ]);
+
+    expect(shelfCovers.has("older-shelf-book")).toBe(false);
+    expect(shelfCovers.has("newer-shelf-book")).toBe(true);
+    await expect(libraryCache.getCachedFullBook("full-book-safe")).resolves.not.toBeNull();
+
+    nowSpy.mockRestore();
+  });
+
+  test("returns no cached shelf covers when indexedDB is unavailable", async () => {
+    delete window.indexedDB;
+
+    const covers = await libraryCache.getCachedShelfCovers([
+      {
+        book_id: "no-db-book",
+        remote_cover_url: "https://example.com/cover.png",
+      },
+    ]);
+
+    await expect(
+      libraryCache.saveShelfCover({
+        book_id: "no-db-book",
+        remote_cover_url: "https://example.com/cover.png",
+      }),
+    ).resolves.toBeNull();
+    expect(covers.size).toBe(0);
   });
 
   test("evicts expired and least-recently-used full book packages under the budget", async () => {

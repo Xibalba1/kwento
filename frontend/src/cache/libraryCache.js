@@ -2,10 +2,13 @@ import { logImageEvent } from "../debug/imageDebug";
 
 const METADATA_CACHE_VERSION = 1;
 const FULL_BOOK_SCHEMA_VERSION = 2;
+const SHELF_COVER_SCHEMA_VERSION = 1;
 const METADATA_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const FULL_BOOK_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+const SHELF_COVER_TTL_MS = 2 * 24 * 60 * 60 * 1000;
 const SIGNED_URL_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 const FULL_BOOK_MAX_BYTES = 100 * 1024 * 1024;
+const SHELF_COVER_MAX_BYTES = 25 * 1024 * 1024;
 const DB_NAME = "kwento-cache";
 const DB_VERSION = 2;
 const ASSETS_STORE = "assets";
@@ -230,6 +233,7 @@ const getAllRecords = (storeName) =>
   runTransaction(storeName, "readonly", (store) => store.getAll());
 
 const fullBookKey = (bookId) => `book:${bookId}`;
+const shelfCoverKey = (bookId) => `shelf-cover:${bookId}`;
 
 const isExpired = (entry) => Boolean(entry?.expiresAt && entry.expiresAt < now());
 
@@ -261,14 +265,32 @@ export const isSignedUrlUsable = (expiresAt, { bufferMs = SIGNED_URL_EXPIRY_BUFF
 };
 
 const sanitizeShelfBook = (book = {}) => {
-  const coverExpiresAt = book.cover_expires_at ?? book.cover?.expires_at ?? null;
-  if (!book.cover_url || isSignedUrlUsable(coverExpiresAt)) {
-    return book;
-  }
+  const remoteCoverUrl = book.remote_cover_url ?? book.cover_url ?? book.cover?.url ?? null;
+  const coverExpiresAt = book.remote_cover_expires_at ?? book.cover_expires_at ?? book.cover?.expires_at ?? null;
+  const coverUrl = remoteCoverUrl && isSignedUrlUsable(coverExpiresAt) ? remoteCoverUrl : null;
 
   return {
     ...book,
-    cover_url: null,
+    remote_cover_url: remoteCoverUrl,
+    remote_cover_expires_at: coverExpiresAt,
+    cover_url: coverUrl,
+    cover_source_kind: coverUrl ? "remote" : "none",
+  };
+};
+
+const toShelfMetadataBook = (book = {}) => {
+  const remoteCoverUrl = book.remote_cover_url ?? book.cover_url ?? book.cover?.url ?? null;
+  const remoteCoverExpiresAt =
+    book.remote_cover_expires_at ?? book.cover_expires_at ?? book.cover?.expires_at ?? null;
+
+  return {
+    ...book,
+    cover_url: remoteCoverUrl,
+    cover_expires_at: remoteCoverExpiresAt,
+    remote_cover_url: remoteCoverUrl,
+    remote_cover_expires_at: remoteCoverExpiresAt,
+    cover_source_kind: undefined,
+    __shelfCoverObjectUrl: undefined,
   };
 };
 
@@ -308,7 +330,11 @@ const isLegacyAssetRecord = (entry) => {
   }
 
   if (entry.cacheClass === CACHE_CLASS_SHELF_COVER) {
-    return true;
+    return (
+      entry.schemaVersion !== SHELF_COVER_SCHEMA_VERSION ||
+      entry.blob != null ||
+      !(entry.arrayBuffer instanceof ArrayBuffer)
+    );
   }
 
   if (entry.cacheClass !== CACHE_CLASS_FULL_BOOK) {
@@ -457,7 +483,7 @@ export const saveShelfMetadata = async (books) => {
   const entry = withExpiry(
     {
       version: METADATA_CACHE_VERSION,
-      books: Array.isArray(books) ? books : [],
+      books: Array.isArray(books) ? books.map((book) => toShelfMetadataBook(book)) : [],
     },
     METADATA_TTL_MS,
   );
@@ -536,6 +562,126 @@ const buildFullBookAssetEntries = async (book) => {
     );
     throw error;
   }
+};
+
+const isValidShelfCoverRecord = (entry) =>
+  entry?.cacheClass === CACHE_CLASS_SHELF_COVER &&
+  entry.schemaVersion === SHELF_COVER_SCHEMA_VERSION &&
+  !isExpired(entry) &&
+  entry.arrayBuffer instanceof ArrayBuffer;
+
+export const deleteShelfCover = async (bookId) => {
+  if (!bookId) {
+    return;
+  }
+
+  await deleteRecord(ASSETS_STORE, shelfCoverKey(bookId));
+};
+
+export const saveShelfCover = async (book) => {
+  if (!book?.book_id) {
+    return null;
+  }
+
+  const sourceUrl = book.remote_cover_url ?? book.cover_url ?? null;
+  const coverExpiresAt = book.remote_cover_expires_at ?? book.cover_expires_at ?? null;
+  if (!sourceUrl || !isSignedUrlUsable(coverExpiresAt)) {
+    if (!sourceUrl) {
+      await deleteShelfCover(book.book_id);
+    }
+    return null;
+  }
+
+  const db = await openDatabase();
+  if (!db) {
+    return null;
+  }
+
+  await ensureCacheMaintenance();
+
+  const key = shelfCoverKey(book.book_id);
+  const existingRecord = await getRecord(ASSETS_STORE, key);
+  if (isValidShelfCoverRecord(existingRecord) && existingRecord.sourceUrl === sourceUrl) {
+    existingRecord.lastUsedAt = now();
+    await putRecord(ASSETS_STORE, existingRecord);
+    return existingRecord;
+  }
+
+  const { arrayBuffer, contentType, byteLength } = await safeFetchAsset(sourceUrl);
+  const entry = withExpiry(
+    {
+      id: key,
+      schemaVersion: SHELF_COVER_SCHEMA_VERSION,
+      bookId: book.book_id,
+      sourceUrl,
+      arrayBuffer,
+      byteLength,
+      contentType,
+      cacheClass: CACHE_CLASS_SHELF_COVER,
+      assetType: "cover",
+      lastUsedAt: now(),
+    },
+    SHELF_COVER_TTL_MS,
+  );
+
+  await putRecord(ASSETS_STORE, entry);
+  return entry;
+};
+
+export const getCachedShelfCovers = async (books = []) => {
+  const db = await openDatabase();
+  if (!db || !Array.isArray(books) || books.length === 0) {
+    return new Map();
+  }
+
+  await ensureCacheMaintenance();
+
+  const coverMap = new Map();
+  await Promise.all(
+    books.map(async (book) => {
+      const bookId = book?.book_id;
+      if (!bookId) {
+        return;
+      }
+
+      const entry = await getRecord(ASSETS_STORE, shelfCoverKey(bookId));
+      if (!isValidShelfCoverRecord(entry)) {
+        if (entry?.id) {
+          await deleteRecord(ASSETS_STORE, entry.id);
+        }
+        return;
+      }
+
+      const sourceUrl = book.remote_cover_url ?? book.cover_url ?? null;
+      const sourceExpiry = book.remote_cover_expires_at ?? book.cover_expires_at ?? null;
+      if (!sourceUrl && sourceExpiry == null) {
+        return;
+      }
+
+      if (sourceUrl && entry.sourceUrl !== sourceUrl) {
+        return;
+      }
+
+      entry.lastUsedAt = now();
+      await putRecord(ASSETS_STORE, entry);
+
+      const blob = new Blob([entry.arrayBuffer], {
+        type: entry.contentType || "application/octet-stream",
+      });
+      const objectUrl = toObjectUrl(blob, sourceUrl, {
+        book_id: bookId,
+        source_url: entry.sourceUrl,
+        origin: "getCachedShelfCovers",
+      });
+
+      coverMap.set(bookId, {
+        objectUrl,
+        sourceUrl: entry.sourceUrl,
+      });
+    }),
+  );
+
+  return coverMap;
 };
 
 const deleteFullBookPackage = async (packageRecord) => {
@@ -759,6 +905,47 @@ export const enforceCacheBudget = async ({ maxBytes = FULL_BOOK_MAX_BYTES } = {}
 
   if (evictedBookIds.length > 0) {
     logImageEvent("full_book:budget_eviction", {
+      evicted_book_ids: evictedBookIds,
+      max_bytes: maxBytes,
+      total_size_after_eviction: activeSize,
+    });
+  }
+};
+
+export const enforceShelfCoverBudget = async ({ maxBytes = SHELF_COVER_MAX_BYTES } = {}) => {
+  await ensureCacheMaintenance();
+
+  const assetRecords = (await getAllRecords(ASSETS_STORE)) ?? [];
+  const coverRecords = assetRecords.filter(
+    (entry) =>
+      entry?.cacheClass === CACHE_CLASS_SHELF_COVER &&
+      entry.schemaVersion === SHELF_COVER_SCHEMA_VERSION,
+  );
+
+  const expiredRecords = coverRecords.filter((entry) => isExpired(entry));
+  if (expiredRecords.length > 0) {
+    await Promise.all(expiredRecords.map((entry) => deleteRecord(ASSETS_STORE, entry.id)));
+  }
+
+  const activeRecords = coverRecords
+    .filter((entry) => !isExpired(entry))
+    .sort((left, right) => (left.lastUsedAt ?? left.updatedAt ?? 0) - (right.lastUsedAt ?? right.updatedAt ?? 0));
+
+  let activeSize = activeRecords.reduce((sum, entry) => sum + estimateRecordSize(entry), 0);
+  const evictedBookIds = [];
+  for (const entry of activeRecords) {
+    if (activeSize <= maxBytes) {
+      break;
+    }
+
+    await deleteRecord(ASSETS_STORE, entry.id);
+    activeSize -= estimateRecordSize(entry);
+    evictedBookIds.push(entry.bookId);
+  }
+
+  if (expiredRecords.length > 0 || evictedBookIds.length > 0) {
+    logImageEvent("shelf_cover:budget_cleanup", {
+      expired_count: expiredRecords.length,
       evicted_book_ids: evictedBookIds,
       max_bytes: maxBytes,
       total_size_after_eviction: activeSize,

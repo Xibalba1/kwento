@@ -388,7 +388,7 @@ const BookList = ({
                       <BookCoverImage
                         bookId={book.book_id}
                         coverUrl={book.cover_url}
-                        sourceKind="remote"
+                        sourceKind={book.cover_source_kind ?? "remote"}
                         bookTitle={book.book_title}
                         onSizeChange={handleSizeChange}
                       />
