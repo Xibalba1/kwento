@@ -150,6 +150,47 @@ describe("libraryCache full-book persistence", () => {
     expect(libraryCache.loadShelfMetadataSync()).toEqual(saved);
   });
 
+  test("suppresses stale cached shelf cover URLs while keeping metadata", async () => {
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(1_000_000);
+
+    await libraryCache.saveShelfMetadata([
+      {
+        book_id: "book-meta",
+        book_title: "Metadata Book",
+        cover_url: "https://example.com/stale-cover.png",
+        cover_expires_at: new Date(1_000_000 + 60_000).toISOString(),
+      },
+    ]);
+
+    expect(libraryCache.loadShelfMetadataSync()).toEqual(
+      expect.objectContaining({
+        books: [
+          expect.objectContaining({
+            book_id: "book-meta",
+            book_title: "Metadata Book",
+            cover_url: null,
+            cover_expires_at: new Date(1_000_000 + 60_000).toISOString(),
+          }),
+        ],
+      }),
+    );
+
+    nowSpy.mockRestore();
+  });
+
+  test("reports signed URLs as stale within the five minute safety buffer", () => {
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(1_000_000);
+
+    expect(libraryCache.isSignedUrlUsable(new Date(1_000_000 + 10 * 60 * 1000).toISOString())).toBe(
+      true,
+    );
+    expect(libraryCache.isSignedUrlUsable(new Date(1_000_000 + 4 * 60 * 1000).toISOString())).toBe(
+      false,
+    );
+
+    nowSpy.mockRestore();
+  });
+
   test("evicts expired and least-recently-used full book packages under the budget", async () => {
     const nowSpy = jest.spyOn(Date, "now");
     nowSpy.mockReturnValue(1_000);
@@ -190,5 +231,75 @@ describe("libraryCache full-book persistence", () => {
     await expect(libraryCache.getCachedFullBook("newer-book")).resolves.not.toBeNull();
 
     nowSpy.mockRestore();
+  });
+
+  test("preserves an existing full-book package when a replacement save fails", async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => makeArrayBuffer("cover-a"),
+        headers: { get: () => "image/png" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => makeArrayBuffer("page-a"),
+        headers: { get: () => "image/png" },
+      });
+
+    await libraryCache.saveFullBookPackage({
+      book_id: "book-safe",
+      book_title: "Original Book",
+      cover_url: "https://example.com/original-cover.png",
+      images: [
+        {
+          page: 1,
+          url: "https://example.com/original-page-1.png",
+        },
+      ],
+      pages: [
+        {
+          page_number: 1,
+          content: {
+            text_content_of_this_page: "Original page",
+          },
+        },
+      ],
+    });
+
+    global.fetch.mockReset();
+    global.fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      arrayBuffer: async () => makeArrayBuffer(""),
+      headers: { get: () => "image/png" },
+    });
+
+    await expect(
+      libraryCache.saveFullBookPackage({
+        book_id: "book-safe",
+        book_title: "Replacement Book",
+        cover_url: "https://example.com/replacement-cover.png",
+        images: [],
+        pages: [
+          {
+            page_number: 1,
+            content: {
+              text_content_of_this_page: "Replacement page",
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow("Failed to fetch asset. status=400");
+
+    const cachedBook = await libraryCache.getCachedFullBook("book-safe");
+
+    expect(cachedBook).toEqual(
+      expect.objectContaining({
+        book_id: "book-safe",
+        book_title: "Original Book",
+      }),
+    );
+    expect(cachedBook.cover_url).toBe("blob:generated-1");
+    expect(cachedBook.images[0].url).toBe("blob:generated-2");
   });
 });
