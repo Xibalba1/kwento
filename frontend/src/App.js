@@ -126,6 +126,14 @@ const App = () => {
         `${bookEntry.book_id}:${bookEntry.remote_cover_url ?? ""}:${bookEntry.remote_cover_expires_at ?? ""}`,
     )
     .join("|");
+  const shelfCoverSnapshotJson = JSON.stringify(
+    libraryBooks.map((bookEntry) => ({
+      book_id: bookEntry.book_id,
+      remote_cover_url: bookEntry.remote_cover_url,
+      remote_cover_expires_at: bookEntry.remote_cover_expires_at,
+      cover_url: bookEntry.remote_cover_url,
+    })),
+  );
 
   const runWithFullBookWork = useCallback(async (work) => {
     setActiveFullBookWorkCount((count) => count + 1);
@@ -318,12 +326,7 @@ const App = () => {
 
   useEffect(() => {
     let isCancelled = false;
-    const booksSnapshot = libraryBooks.map((bookEntry) => ({
-      book_id: bookEntry.book_id,
-      remote_cover_url: bookEntry.remote_cover_url,
-      remote_cover_expires_at: bookEntry.remote_cover_expires_at,
-      cover_url: bookEntry.remote_cover_url,
-    }));
+    const booksSnapshot = JSON.parse(shelfCoverSnapshotJson);
 
     const loadShelfCoverUrls = async () => {
       try {
@@ -339,14 +342,14 @@ const App = () => {
       }
     };
 
-    if (libraryBooks.length > 0) {
+    if (booksSnapshot.length > 0) {
       void loadShelfCoverUrls();
     }
 
     return () => {
       isCancelled = true;
     };
-  }, [libraryBooks.length, shelfCoverCacheKey]);
+  }, [shelfCoverCacheKey, shelfCoverSnapshotJson]);
 
   useEffect(() => {
     const previousUrls = previousShelfCoverUrlsRef.current;
