@@ -27,6 +27,9 @@ const releaseObjectUrls = (urls = []) => {
 const sortBooksByTitle = (books = []) =>
   [...books].sort((left, right) => left.book_title.localeCompare(right.book_title));
 
+const areBookIdListsEqual = (left = [], right = []) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+
 const normalizeBook = (bookData = {}) => ({
   ...bookData,
   book_id: bookData.book_id,
@@ -52,6 +55,7 @@ const App = () => {
   const cachedBookObjectUrlsRef = useRef([]);
   const previousBookObjectUrlsRef = useRef([]);
   const inFlightBookSelectionRef = useRef(new Map());
+  const visibleBookIdsRef = useRef([]);
 
   const cacheFullBookInBackground = async (completeBookData) => {
     try {
@@ -252,6 +256,16 @@ const App = () => {
     setIsModalOpen(true);
   };
 
+  const handleVisibleBooksChange = useCallback((nextVisibleBookIds) => {
+    const normalizedIds = Array.isArray(nextVisibleBookIds) ? nextVisibleBookIds : [];
+    if (areBookIdListsEqual(visibleBookIdsRef.current, normalizedIds)) {
+      return;
+    }
+
+    visibleBookIdsRef.current = normalizedIds;
+    setVisibleBookIds(normalizedIds);
+  }, []);
+
   const handleGenerateBook = async () => {
     if (!theme.trim()) {
       alert("Please enter a theme to generate a book.");
@@ -448,7 +462,7 @@ const App = () => {
         error={libraryError && libraryBooks.length === 0}
         onRetry={() => fetchLibraryBooks({ force: true })}
         onSelectBook={handleSelectBook}
-        onVisibleBooksChange={setVisibleBookIds}
+        onVisibleBooksChange={handleVisibleBooksChange}
         onToggleArchive={handleToggleArchive}
         archiveActionBookIds={archiveActionBookIds}
       />

@@ -138,6 +138,52 @@ test("renders cached shelf metadata before the background refresh resolves", asy
   });
 });
 
+test("suppresses stale cached shelf covers until refreshed shelf data arrives", async () => {
+  const now = Date.now();
+  mockLoadShelfMetadataSync.mockReturnValue({
+    version: 1,
+    books: [
+      {
+        book_id: "cached-book-stale-cover",
+        book_title: "Cached Shelf Book",
+        cover_url: null,
+        cover_expires_at: new Date(now - 60_000).toISOString(),
+        is_archived: false,
+      },
+    ],
+    updatedAt: now,
+    expiresAt: now + 1_000,
+  });
+
+  const booksRequest = createDeferred();
+  global.fetch.mockReturnValue(booksRequest.promise);
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  expect(screen.getByRole("button", { name: exactName("Cached Shelf Book") })).toBeInTheDocument();
+  expect(screen.queryByRole("img", { name: /cover for cached shelf book/i })).not.toBeInTheDocument();
+
+  await act(async () => {
+    booksRequest.resolve({
+      ok: true,
+      json: async () => [
+        {
+          book_id: "cached-book-stale-cover",
+          book_title: "Cached Shelf Book",
+          cover_url: "https://example.com/fresh-cover.png",
+          cover_expires_at: new Date(now + 60 * 60 * 1000).toISOString(),
+          is_archived: false,
+        },
+      ],
+    });
+  });
+
+  const image = await screen.findByRole("img", { name: /cover for cached shelf book/i });
+  expect(image).toHaveAttribute("src", "https://example.com/fresh-cover.png");
+});
+
 test("keeps cached shelf metadata visible when the background refresh fails", async () => {
   window.localStorage.setItem(
     "kwento_shelf_metadata_v1",
@@ -237,6 +283,7 @@ test("revokes cached book object URLs when the modal closes, not when it opens",
   mockGetCachedFullBook.mockResolvedValue({
     book_id: "book-2",
     book_title: "Cached Modal Book",
+    json_url: "https://example.com/stale-book-2.json",
     __cachedObjectUrls: ["blob:book-2-cover", "blob:book-2-page-1"],
     pages: [
       {
@@ -274,6 +321,7 @@ test("revokes cached book object URLs when the modal closes, not when it opens",
 
   expect(await screen.findByRole("button", { name: /close modal/i })).toBeInTheDocument();
   expect(global.URL.revokeObjectURL).not.toHaveBeenCalled();
+  expect(global.fetch).toHaveBeenCalledTimes(1);
 
   fireEvent.click(screen.getByRole("button", { name: /close modal/i }));
 

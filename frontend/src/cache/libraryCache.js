@@ -4,6 +4,7 @@ const METADATA_CACHE_VERSION = 1;
 const FULL_BOOK_SCHEMA_VERSION = 2;
 const METADATA_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const FULL_BOOK_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+const SIGNED_URL_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 const FULL_BOOK_MAX_BYTES = 100 * 1024 * 1024;
 const DB_NAME = "kwento-cache";
 const DB_VERSION = 2;
@@ -232,6 +233,45 @@ const fullBookKey = (bookId) => `book:${bookId}`;
 
 const isExpired = (entry) => Boolean(entry?.expiresAt && entry.expiresAt < now());
 
+const parseTimestamp = (value) => {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (value instanceof Date) {
+    const timestamp = value.getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+};
+
+export const isSignedUrlUsable = (expiresAt, { bufferMs = SIGNED_URL_EXPIRY_BUFFER_MS } = {}) => {
+  const expiresAtMs = parseTimestamp(expiresAt);
+  if (expiresAtMs == null) {
+    return true;
+  }
+
+  return expiresAtMs - bufferMs > now();
+};
+
+const sanitizeShelfBook = (book = {}) => {
+  const coverExpiresAt = book.cover_expires_at ?? book.cover?.expires_at ?? null;
+  if (!book.cover_url || isSignedUrlUsable(coverExpiresAt)) {
+    return book;
+  }
+
+  return {
+    ...book,
+    cover_url: null,
+  };
+};
+
 const deleteEntries = async (entries) => {
   await Promise.all(
     entries.map(async (entry) => {
@@ -407,7 +447,10 @@ export const loadShelfMetadataSync = () => {
     return null;
   }
 
-  return entry;
+  return {
+    ...entry,
+    books: entry.books.map((book) => sanitizeShelfBook(book)),
+  };
 };
 
 export const saveShelfMetadata = async (books) => {
@@ -449,37 +492,50 @@ const buildFullBookAssetEntries = async (book) => {
     });
   }
 
-  const assets = await Promise.all(
-    assetDescriptors.map(async (asset) => {
-      const { arrayBuffer, contentType, byteLength } = await safeFetchAsset(asset.sourceUrl);
-      const entry = withExpiry(
-        {
-          id: asset.key,
-          schemaVersion: FULL_BOOK_SCHEMA_VERSION,
-          bookId: book.book_id,
+  const persistedAssetKeys = [];
+
+  try {
+    const assets = await Promise.all(
+      assetDescriptors.map(async (asset) => {
+        const { arrayBuffer, contentType, byteLength } = await safeFetchAsset(asset.sourceUrl);
+        const entry = withExpiry(
+          {
+            id: asset.key,
+            schemaVersion: FULL_BOOK_SCHEMA_VERSION,
+            bookId: book.book_id,
+            page: asset.page,
+            sourceUrl: asset.sourceUrl,
+            arrayBuffer,
+            byteLength,
+            contentType,
+            cacheClass: CACHE_CLASS_FULL_BOOK,
+            assetType: asset.type,
+            lastUsedAt: now(),
+          },
+          FULL_BOOK_TTL_MS,
+        );
+
+        await putRecord(ASSETS_STORE, entry);
+        persistedAssetKeys.push(asset.key);
+        return {
+          key: asset.key,
+          type: asset.type,
           page: asset.page,
           sourceUrl: asset.sourceUrl,
-          arrayBuffer,
-          byteLength,
-          contentType,
-          cacheClass: CACHE_CLASS_FULL_BOOK,
-          assetType: asset.type,
-          lastUsedAt: now(),
-        },
-        FULL_BOOK_TTL_MS,
-      );
+        };
+      }),
+    );
 
-      await putRecord(ASSETS_STORE, entry);
-      return {
-        key: asset.key,
-        type: asset.type,
-        page: asset.page,
-        sourceUrl: asset.sourceUrl,
-      };
-    }),
-  );
-
-  return assets;
+    return assets;
+  } catch (error) {
+    await deleteEntries(
+      persistedAssetKeys.map((assetKey) => ({
+        storeName: ASSETS_STORE,
+        id: assetKey,
+      })),
+    );
+    throw error;
+  }
 };
 
 const deleteFullBookPackage = async (packageRecord) => {
@@ -516,11 +572,10 @@ export const saveFullBookPackage = async (book) => {
   await ensureCacheMaintenance();
 
   const existingPackage = await getRecord(BOOKS_STORE, fullBookKey(book.book_id));
+  const assets = await buildFullBookAssetEntries(book);
   if (existingPackage) {
     await deleteFullBookPackage(existingPackage);
   }
-
-  const assets = await buildFullBookAssetEntries(book);
   const packageRecord = withExpiry(
     {
       id: fullBookKey(book.book_id),
@@ -621,6 +676,7 @@ export const getCachedFullBook = async (bookId) => {
 
   return {
     ...packageRecord.package,
+    json_url: null,
     cover: packageRecord.package.cover
       ? {
           ...packageRecord.package.cover,
