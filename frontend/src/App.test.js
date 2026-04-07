@@ -722,6 +722,7 @@ test("archives a shelf book and moves it to the archive tab", async () => {
           book_id: "book-archive-1",
           book_title: "Archive Candidate",
           is_archived: false,
+          is_favorite: true,
         },
       ],
     })
@@ -731,6 +732,7 @@ test("archives a shelf book and moves it to the archive tab", async () => {
         book_id: "book-archive-1",
         book_title: "Archive Candidate",
         is_archived: true,
+        is_favorite: false,
         json_url: "https://example.com/book-archive-1.json",
         images: [],
       }),
@@ -751,7 +753,7 @@ test("archives a shelf book and moves it to the archive tab", async () => {
   });
 
   await waitFor(() => {
-    expect(global.fetch).toHaveBeenLastCalledWith("http://localhost/books/book-archive-1/archive/", {
+    expect(global.fetch).toHaveBeenLastCalledWith("http://localhost/books/book-archive-1/library-state/", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ is_archived: true }),
@@ -763,4 +765,186 @@ test("archives a shelf book and moves it to the archive tab", async () => {
   });
 
   expect(await screen.findByRole("button", { name: exactName("Archive Candidate") })).toBeInTheDocument();
+});
+
+test("favorites a shelf book and shows it in the favorites tab", async () => {
+  global.fetch
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        {
+          book_id: "book-favorite-1",
+          book_title: "Favorite Candidate",
+          is_archived: false,
+          is_favorite: false,
+        },
+      ],
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        book_id: "book-favorite-1",
+        book_title: "Favorite Candidate",
+        is_archived: false,
+        is_favorite: true,
+        json_url: "https://example.com/book-favorite-1.json",
+        images: [],
+      }),
+    });
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  await act(async () => {
+    fireEvent.click(await screen.findByRole("button", {
+      name: /more actions for favorite candidate/i,
+    }));
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /add to favorites/i }));
+  });
+
+  await waitFor(() => {
+    expect(global.fetch).toHaveBeenLastCalledWith("http://localhost/books/book-favorite-1/library-state/", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_favorite: true }),
+    });
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("tab", { name: /favorites/i }));
+  });
+
+  expect(await screen.findByRole("button", { name: exactName("Favorite Candidate") })).toBeInTheDocument();
+});
+
+test("favoriting an archived book restores it to shelf and favorites", async () => {
+  global.fetch
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        {
+          book_id: "book-favorite-archive-1",
+          book_title: "Archived Favorite Candidate",
+          is_archived: true,
+          is_favorite: false,
+        },
+      ],
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        book_id: "book-favorite-archive-1",
+        book_title: "Archived Favorite Candidate",
+        is_archived: false,
+        is_favorite: true,
+        json_url: "https://example.com/book-favorite-archive-1.json",
+        images: [],
+      }),
+    });
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("tab", { name: /archive/i }));
+  });
+
+  await act(async () => {
+    fireEvent.click(await screen.findByRole("button", {
+      name: /more actions for archived favorite candidate/i,
+    }));
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /add to favorites/i }));
+  });
+
+  await waitFor(() => {
+    expect(global.fetch).toHaveBeenLastCalledWith(
+      "http://localhost/books/book-favorite-archive-1/library-state/",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_favorite: true }),
+      },
+    );
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("tab", { name: /book shelf/i }));
+  });
+
+  expect(await screen.findByRole("button", { name: exactName("Archived Favorite Candidate") })).toBeInTheDocument();
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("tab", { name: /favorites/i }));
+  });
+
+  expect(await screen.findByRole("button", { name: exactName("Archived Favorite Candidate") })).toBeInTheDocument();
+});
+
+test("favoriting an archived book with stale favorite state removes it from archive immediately", async () => {
+  const patchRequest = createDeferred();
+
+  global.fetch
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        {
+          book_id: "book-stale-archive-favorite-1",
+          book_title: "Stale Archived Favorite Candidate",
+          is_archived: true,
+          is_favorite: true,
+        },
+      ],
+    })
+    .mockReturnValueOnce(patchRequest.promise);
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("tab", { name: /archive/i }));
+  });
+
+  expect(await screen.findByRole("button", { name: exactName("Stale Archived Favorite Candidate") })).toBeInTheDocument();
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", {
+      name: /more actions for stale archived favorite candidate/i,
+    }));
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /add to favorites/i }));
+  });
+
+  expect(screen.queryByRole("button", { name: exactName("Stale Archived Favorite Candidate") })).not.toBeInTheDocument();
+  expect(screen.getByText("Archive is empty")).toBeInTheDocument();
+
+  await act(async () => {
+    patchRequest.resolve({
+      ok: true,
+      json: async () => ({
+        book_id: "book-stale-archive-favorite-1",
+        book_title: "Stale Archived Favorite Candidate",
+        is_archived: false,
+        is_favorite: true,
+        json_url: "https://example.com/book-stale-archive-favorite-1.json",
+        images: [],
+      }),
+    });
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("tab", { name: /favorites/i }));
+  });
+
+  expect(await screen.findByRole("button", { name: exactName("Stale Archived Favorite Candidate") })).toBeInTheDocument();
 });

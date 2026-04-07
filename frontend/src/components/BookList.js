@@ -4,6 +4,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getImageDebugPageContext, logImageEvent } from "../debug/imageDebug";
 
 const BOOK_SHELF_TAB = "bookshelf";
+const FAVORITES_TAB = "favorites";
 const ARCHIVE_TAB = "archive";
 const TAB_WIDTH = 152;
 const TAB_BAR_SIDE_PADDING = 18;
@@ -11,6 +12,7 @@ const TAB_HEIGHT = 52;
 const TAB_BAR_OVERLAP = 8;
 const ACTIVE_TAB_BRIDGE_HEIGHT = 12;
 const MOBILE_GRID_MEDIA_QUERY = "(max-width: 600px)";
+const CARD_CORNER_RADIUS = 14;
 
 const usePrefersReducedMotion = () => {
   const getPreference = () =>
@@ -168,8 +170,8 @@ const BookList = ({
   onRetry,
   onSelectBook,
   onVisibleBooksChange,
-  onToggleArchive = () => {},
-  archiveActionBookIds = [],
+  onUpdateLibraryState = () => {},
+  pendingLibraryStateBookIds = [],
 }) => {
   const buttonRefs = useRef({});
   const cardInnerRefs = useRef({});
@@ -179,10 +181,18 @@ const BookList = ({
   const [flippedBookId, setFlippedBookId] = useState(null);
   const prefersReducedMotion = usePrefersReducedMotion();
   const isMobileGrid = useIsMobileGrid();
-  const pendingArchiveBookIds = new Set(archiveActionBookIds);
-  const visibleBooks = books.filter((book) =>
-    activeTab === BOOK_SHELF_TAB ? !book.is_archived : book.is_archived,
-  );
+  const pendingStateBookIds = new Set(pendingLibraryStateBookIds);
+  const visibleBooks = books.filter((book) => {
+    if (activeTab === BOOK_SHELF_TAB) {
+      return !book.is_archived;
+    }
+
+    if (activeTab === FAVORITES_TAB) {
+      return Boolean(book.is_favorite) && !book.is_archived;
+    }
+
+    return book.is_archived;
+  });
 
   useLayoutEffect(() => {
     if (visibleBooks.length === 0) {
@@ -373,7 +383,56 @@ const BookList = ({
   const handleArchiveAction = (event, book) => {
     event.stopPropagation();
     setFlippedBookId(null);
-    onToggleArchive(book.book_id, !book.is_archived);
+    onUpdateLibraryState(book.book_id, { is_archived: !book.is_archived });
+  };
+
+  const handleFavoriteAction = (event, book) => {
+    event.stopPropagation();
+    setFlippedBookId(null);
+    const isEffectiveFavorite = Boolean(book.is_favorite) && !book.is_archived;
+    onUpdateLibraryState(book.book_id, { is_favorite: !isEffectiveFavorite });
+  };
+
+  const getTabStyleSet = (tab) => {
+    if (tab === FAVORITES_TAB) {
+      return {
+        tabButton: styles.favoritesTabButton,
+        content: styles.favoritesContent,
+        bridge: styles.favoritesActiveTabBridge,
+        bookButton: styles.favoritesBookButton,
+        frontActionButton: styles.favoritesFrontActionButton,
+        bookTitle: styles.favoritesBookTitle,
+        cardBack: styles.favoritesCardBack,
+        backTitle: styles.favoritesBackTitle,
+        backActionButton: styles.favoritesBackActionButton,
+      };
+    }
+
+    if (tab === ARCHIVE_TAB) {
+      return {
+        tabButton: styles.archiveTabButton,
+        content: styles.archiveContent,
+        bridge: styles.archiveActiveTabBridge,
+        bookButton: styles.archiveBookButton,
+        frontActionButton: styles.archiveFrontActionButton,
+        bookTitle: styles.archiveBookTitle,
+        cardBack: styles.archiveCardBack,
+        backTitle: styles.archiveBackTitle,
+        backActionButton: styles.archiveBackActionButton,
+      };
+    }
+
+    return {
+      tabButton: null,
+      content: null,
+      bridge: null,
+      bookButton: null,
+      frontActionButton: null,
+      bookTitle: null,
+      cardBack: null,
+      backTitle: null,
+      backActionButton: null,
+    };
   };
 
   const renderContent = () => {
@@ -398,9 +457,14 @@ const BookList = ({
           style={{
             ...styles.message,
             ...(activeTab === ARCHIVE_TAB ? styles.archiveMessage : {}),
+            ...(activeTab === FAVORITES_TAB ? styles.favoritesMessage : {}),
           }}
         >
-          {activeTab === ARCHIVE_TAB ? "Archive is empty" : "Book Shelf is empty"}
+          {activeTab === ARCHIVE_TAB
+            ? "Archive is empty"
+            : activeTab === FAVORITES_TAB
+              ? "You don't have any Favorites yet."
+              : "Book Shelf is empty"}
         </p>
       );
     }
@@ -413,6 +477,12 @@ const BookList = ({
         }}
       >
         {visibleBooks.map((book) => (
+          (() => {
+            const tabStyleSet = getTabStyleSet(activeTab);
+            const isPending = pendingStateBookIds.has(book.book_id);
+            const isEffectiveFavorite = Boolean(book.is_favorite) && !book.is_archived;
+
+            return (
           <li
             key={book.book_id}
             style={styles.listItem}
@@ -474,7 +544,7 @@ const BookList = ({
                     aria-label={book.book_title}
                     style={{
                       ...styles.bookButton,
-                      ...(activeTab === ARCHIVE_TAB ? styles.archiveBookButton : {}),
+                      ...(tabStyleSet.bookButton ?? {}),
                     }}
                     onClick={() => {
                       onSelectBook(book.book_id);
@@ -483,7 +553,7 @@ const BookList = ({
                     <span
                       style={{
                         ...styles.bookTitle,
-                        ...(activeTab === ARCHIVE_TAB ? styles.archiveBookTitle : {}),
+                        ...(tabStyleSet.bookTitle ?? {}),
                       }}
                     >
                       {book.book_title}
@@ -503,7 +573,7 @@ const BookList = ({
                     aria-label={`More actions for ${book.book_title}`}
                     style={{
                       ...styles.frontActionButton,
-                      ...(activeTab === ARCHIVE_TAB ? styles.archiveFrontActionButton : {}),
+                      ...(tabStyleSet.frontActionButton ?? {}),
                     }}
                     onClick={(event) => handleFlipToggle(event, book.book_id)}
                   >
@@ -515,7 +585,7 @@ const BookList = ({
                   style={{
                     ...styles.cardFace,
                     ...styles.cardBack,
-                    ...(activeTab === ARCHIVE_TAB ? styles.archiveCardBack : {}),
+                    ...(tabStyleSet.cardBack ?? {}),
                     ...(prefersReducedMotion ? styles.cardBackReducedMotion : {}),
                     ...(prefersReducedMotion
                       ? flippedBookId === book.book_id
@@ -529,7 +599,7 @@ const BookList = ({
                     aria-label={`Return to cover for ${book.book_title}`}
                     style={{
                       ...styles.backActionButton,
-                      ...(activeTab === ARCHIVE_TAB ? styles.archiveBackActionButton : {}),
+                      ...(tabStyleSet.backActionButton ?? {}),
                     }}
                     onClick={(event) => handleFlipToggle(event, book.book_id)}
                   >
@@ -539,31 +609,47 @@ const BookList = ({
                     <p
                       style={{
                         ...styles.backTitle,
-                        ...(activeTab === ARCHIVE_TAB ? styles.archiveBackTitle : {}),
+                        ...(tabStyleSet.backTitle ?? {}),
                       }}
                     >
                       {book.book_title}
                     </p>
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.menuActionButton,
-                        ...(activeTab === ARCHIVE_TAB ? styles.archiveMenuActionButton : {}),
-                      }}
-                      disabled={pendingArchiveBookIds.has(book.book_id)}
-                      onClick={(event) => handleArchiveAction(event, book)}
-                    >
-                      {pendingArchiveBookIds.has(book.book_id)
-                        ? "Saving..."
-                        : book.is_archived
-                          ? "Restore to Book Shelf"
-                          : "Move to Archive"}
-                    </button>
+                    <div style={styles.backActions}>
+                      <button
+                        type="button"
+                        style={{
+                          ...styles.menuActionButton,
+                          ...(activeTab === ARCHIVE_TAB ? styles.archiveMenuActionButton : {}),
+                        }}
+                        disabled={isPending}
+                        onClick={(event) => handleArchiveAction(event, book)}
+                      >
+                        {isPending
+                          ? "Saving..."
+                          : book.is_archived
+                            ? "Restore to Book Shelf"
+                            : "Move to Archive"}
+                      </button>
+                      <button
+                        type="button"
+                        style={styles.favoritesMenuActionButton}
+                        disabled={isPending}
+                        onClick={(event) => handleFavoriteAction(event, book)}
+                      >
+                        {isPending
+                          ? "Saving..."
+                          : isEffectiveFavorite
+                            ? "Remove from Favorites"
+                            : "Add to Favorites"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </li>
+            );
+          })()
         ))}
       </ul>
     );
@@ -588,6 +674,21 @@ const BookList = ({
         <button
           type="button"
           role="tab"
+          aria-selected={activeTab === FAVORITES_TAB}
+          onClick={() => setActiveTab(FAVORITES_TAB)}
+          style={{
+            ...styles.tabButton,
+            ...styles.favoritesTabButton,
+            ...styles.trailingTabButton,
+            ...(activeTab !== FAVORITES_TAB ? styles.inactiveTabButton : {}),
+            ...(activeTab === FAVORITES_TAB ? styles.activeTabButton : {}),
+          }}
+        >
+          <span style={styles.tabLabel}>Favorites</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={activeTab === ARCHIVE_TAB}
           onClick={() => setActiveTab(ARCHIVE_TAB)}
           style={{
@@ -605,18 +706,20 @@ const BookList = ({
           data-testid="active-tab-bridge"
           style={{
             ...styles.activeTabBridge,
-            ...(activeTab === ARCHIVE_TAB ? styles.archiveActiveTabBridge : {}),
+            ...(getTabStyleSet(activeTab).bridge ?? {}),
             left:
               activeTab === BOOK_SHELF_TAB
                 ? TAB_BAR_SIDE_PADDING
-                : TAB_BAR_SIDE_PADDING + TAB_WIDTH,
+                : activeTab === FAVORITES_TAB
+                  ? TAB_BAR_SIDE_PADDING + (TAB_WIDTH - 10)
+                  : TAB_BAR_SIDE_PADDING + ((TAB_WIDTH - 10) * 2),
           }}
         />
       </div>
       <div
         style={{
           ...styles.content,
-          ...(activeTab === ARCHIVE_TAB ? styles.archiveContent : {}),
+          ...(getTabStyleSet(activeTab).content ?? {}),
         }}
       >
         {renderContent()}
@@ -680,6 +783,10 @@ const styles = {
     backgroundColor: "#FFCC00",
     color: "#CA054D",
   },
+  favoritesTabButton: {
+    backgroundColor: "#36839b",
+    color: "#FFCC00",
+  },
   inactiveTabButton: {
     zIndex: 1,
     filter: "brightness(0.96)",
@@ -701,6 +808,9 @@ const styles = {
   archiveActiveTabBridge: {
     backgroundColor: "#FFCC00",
   },
+  favoritesActiveTabBridge: {
+    backgroundColor: "#36839b",
+  },
   content: {
     minHeight: "48px",
     backgroundColor: "#CA054D",
@@ -716,6 +826,10 @@ const styles = {
   archiveContent: {
     backgroundColor: "#FFCC00",
     color: "#CA054D",
+  },
+  favoritesContent: {
+    backgroundColor: "#36839b",
+    color: "#FFCC00",
   },
   list: {
     display: 'grid',
@@ -735,6 +849,8 @@ const styles = {
     position: "relative",
     width: "100%",
     perspective: "1200px",
+    borderRadius: `${CARD_CORNER_RADIUS}px`,
+    overflow: "hidden",
   },
   cardReducedMotion: {
     perspective: "none",
@@ -744,6 +860,7 @@ const styles = {
     width: "100%",
     transformStyle: "preserve-3d",
     transition: "transform 320ms cubic-bezier(0.22, 1, 0.36, 1)",
+    borderRadius: `${CARD_CORNER_RADIUS}px`,
   },
   cardInnerFlipped: {
     transform: "rotateY(180deg)",
@@ -755,7 +872,8 @@ const styles = {
     width: "100%",
     boxSizing: "border-box",
     backfaceVisibility: "hidden",
-    borderRadius: "14px",
+    borderRadius: `${CARD_CORNER_RADIUS}px`,
+    overflow: "hidden",
   },
   visibleFaceReducedMotion: {
     opacity: 1,
@@ -784,7 +902,7 @@ const styles = {
     padding: "16px 16px 24px 24px",
     backgroundColor: "#FFCC00",
     border: "none",
-    borderRadius: "8px",
+    borderRadius: `${CARD_CORNER_RADIUS}px`,
     cursor: "pointer",
     transition: "background-color 0.2s",
     textAlign: "center",
@@ -794,6 +912,9 @@ const styles = {
     outline: "none",
   },
   archiveBookButton: {
+    backgroundColor: "#36839b",
+  },
+  favoritesBookButton: {
     backgroundColor: "#CA054D",
   },
   frontActionButton: {
@@ -818,6 +939,10 @@ const styles = {
     backgroundColor: "rgba(255, 204, 0, 0.2)",
     color: "#FFCC00",
   },
+  favoritesFrontActionButton: {
+    backgroundColor: "rgba(255, 204, 0, 0.2)",
+    color: "#FFCC00",
+  },
   bookTitle: {
     fontSize: "20px",
     color: "#CA054D",
@@ -827,6 +952,9 @@ const styles = {
     flexShrink: 0,
   },
   archiveBookTitle: {
+    color: "#FFCC00",
+  },
+  favoritesBookTitle: {
     color: "#FFCC00",
   },
   coverSlot: {
@@ -867,7 +995,10 @@ const styles = {
     justifyContent: "center",
   },
   archiveCardBack: {
-    background: "linear-gradient(160deg, rgba(202, 5, 77, 0.98), rgba(138, 0, 51, 0.98))",
+    background: "linear-gradient(160deg, rgba(125, 182, 199, 0.98), rgba(82, 156, 179, 0.98))",
+  },
+  favoritesCardBack: {
+    background: "linear-gradient(160deg, rgba(234, 122, 160, 0.98), rgba(214, 78, 126, 0.98))",
   },
   cardBackReducedMotion: {
     transform: "none",
@@ -879,6 +1010,13 @@ const styles = {
     gap: "18px",
     width: "100%",
   },
+  backActions: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+    width: "100%",
+    alignItems: "center",
+  },
   backTitle: {
     margin: 0,
     color: "#8A0033",
@@ -887,6 +1025,9 @@ const styles = {
     textAlign: "center",
   },
   archiveBackTitle: {
+    color: "#FFCC00",
+  },
+  favoritesBackTitle: {
     color: "#FFCC00",
   },
   backActionButton: {
@@ -908,6 +1049,10 @@ const styles = {
     backgroundColor: "#FFCC00",
     color: "#CA054D",
   },
+  favoritesBackActionButton: {
+    backgroundColor: "#FFCC00",
+    color: "#36839b",
+  },
   menuActionButton: {
     width: "100%",
     maxWidth: "220px",
@@ -924,6 +1069,18 @@ const styles = {
     backgroundColor: "#FFCC00",
     color: "#CA054D",
   },
+  favoritesMenuActionButton: {
+    width: "100%",
+    maxWidth: "220px",
+    border: "none",
+    borderRadius: "14px",
+    padding: "14px 18px",
+    backgroundColor: "#36839b",
+    color: "#FFCC00",
+    fontSize: "15px",
+    fontWeight: "700",
+    cursor: "pointer",
+  },
   materialSymbol: {
     fontFamily: '"Material Symbols Outlined"',
     fontSize: "22px",
@@ -938,6 +1095,9 @@ const styles = {
   },
   archiveMessage: {
     color: "#CA054D",
+  },
+  favoritesMessage: {
+    color: "#FFCC00",
   },
   feedbackPanel: {
     display: "flex",

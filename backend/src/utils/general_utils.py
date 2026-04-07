@@ -321,8 +321,59 @@ def _default_book_library_state(book_id: str) -> Dict[str, Any]:
     return {
         "book_id": str(book_id),
         "is_archived": False,
+        "is_favorite": False,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _normalize_book_library_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    normalized_state = {
+        "book_id": str(state.get("book_id", "")),
+        "is_archived": bool(state.get("is_archived", False)),
+        "is_favorite": bool(state.get("is_favorite", False)),
+        "updated_at": state.get("updated_at")
+        or datetime.now(timezone.utc).isoformat(),
+    }
+
+    if normalized_state["is_archived"]:
+        normalized_state["is_favorite"] = False
+    elif normalized_state["is_favorite"]:
+        normalized_state["is_archived"] = False
+
+    return normalized_state
+
+
+def _resolve_book_library_state_update(
+    current_state: Dict[str, Any],
+    *,
+    is_archived: bool | None = None,
+    is_favorite: bool | None = None,
+) -> Dict[str, Any]:
+    resolved_state = {
+        "book_id": str(current_state.get("book_id", "")),
+        "is_archived": (
+            bool(is_archived)
+            if is_archived is not None
+            else bool(current_state.get("is_archived", False))
+        ),
+        "is_favorite": (
+            bool(is_favorite)
+            if is_favorite is not None
+            else bool(current_state.get("is_favorite", False))
+        ),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if is_archived is True:
+        resolved_state["is_favorite"] = False
+    elif is_favorite is True:
+        resolved_state["is_archived"] = False
+    elif resolved_state["is_archived"]:
+        resolved_state["is_favorite"] = False
+    elif resolved_state["is_favorite"]:
+        resolved_state["is_archived"] = False
+
+    return resolved_state
 
 
 def get_book_library_state(book_id: str) -> Dict[str, Any]:
@@ -337,21 +388,28 @@ def get_book_library_state(book_id: str) -> Dict[str, Any]:
         logger.warning("Failed to load book library state for book_id=%s: %s", book_id, e)
         return _default_book_library_state(book_id)
 
-    return {
+    return _normalize_book_library_state({
         "book_id": str(book_id),
-        "is_archived": bool(state.get("is_archived", False)),
-        "updated_at": state.get("updated_at")
-        or datetime.now(timezone.utc).isoformat(),
-    }
+        "is_archived": state.get("is_archived", False),
+        "is_favorite": state.get("is_favorite", False),
+        "updated_at": state.get("updated_at"),
+    })
 
 
-def save_book_library_state(book_id: str, is_archived: bool) -> Dict[str, Any]:
+def save_book_library_state(
+    book_id: str,
+    *,
+    is_archived: bool | None = None,
+    is_favorite: bool | None = None,
+) -> Dict[str, Any]:
     relative_path = construct_storage_path(str(book_id))
-    state = {
-        "book_id": str(book_id),
-        "is_archived": bool(is_archived),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
+    current_state = get_book_library_state(book_id)
+    state = _resolve_book_library_state_update(
+        current_state,
+        is_archived=is_archived,
+        is_favorite=is_favorite,
+    )
+
     write_json_file(
         file_name=BOOK_METADATA_FILENAME,
         data=state,
@@ -359,7 +417,8 @@ def save_book_library_state(book_id: str, is_archived: bool) -> Dict[str, Any]:
         metadata={
             "artifact_type": "book_metadata",
             "book_id": str(book_id),
-            "is_archived": str(bool(is_archived)).lower(),
+            "is_archived": str(state["is_archived"]).lower(),
+            "is_favorite": str(state["is_favorite"]).lower(),
         },
     )
     return state
@@ -482,9 +541,10 @@ def get_book_list() -> List[Dict[str, Any]]:
                                 e,
                             )
                         else:
-                            library_state_by_book_id[book_id] = bool(
-                                state.get("is_archived", False)
-                            )
+                            library_state_by_book_id[book_id] = {
+                                "is_archived": bool(state.get("is_archived", False)),
+                                "is_favorite": bool(state.get("is_favorite", False)),
+                            }
                         continue
 
                     if len(parts) != 2 or parts[1] != f"{parts[0]}.json":
@@ -515,16 +575,23 @@ def get_book_list() -> List[Dict[str, Any]]:
                                 "cover_url": None,
                                 "cover_expires_at": None,
                                 "images": [],
-                                "is_archived": library_state_by_book_id.get(book_id, False),
+                                "is_archived": library_state_by_book_id.get(book_id, {}).get(
+                                    "is_archived", False
+                                ),
+                                "is_favorite": library_state_by_book_id.get(book_id, {}).get(
+                                    "is_favorite", False
+                                ),
                             }
                         else:
                             # Update json_url and book_title if needed
                             books_dict[book_id]["json_url"] = json_url
                             books_dict[book_id]["book_title"] = book_title
                             books_dict[book_id]["is_archived"] = library_state_by_book_id.get(
-                                book_id,
-                                books_dict[book_id].get("is_archived", False),
-                            )
+                                book_id, {}
+                            ).get("is_archived", books_dict[book_id].get("is_archived", False))
+                            books_dict[book_id]["is_favorite"] = library_state_by_book_id.get(
+                                book_id, {}
+                            ).get("is_favorite", books_dict[book_id].get("is_favorite", False))
                     else:
                         logger.error(f"Missing metadata for blob {blob_name}")
 
@@ -544,7 +611,12 @@ def get_book_list() -> List[Dict[str, Any]]:
                                 "cover_url": cover_url,
                                 "cover_expires_at": expires_at,
                                 "images": [],
-                                "is_archived": library_state_by_book_id.get(book_id, False),
+                                "is_archived": library_state_by_book_id.get(book_id, {}).get(
+                                    "is_archived", False
+                                ),
+                                "is_favorite": library_state_by_book_id.get(book_id, {}).get(
+                                    "is_favorite", False
+                                ),
                             }
                         else:
                             books_dict[book_id]["cover_url"] = cover_url
@@ -573,7 +645,12 @@ def get_book_list() -> List[Dict[str, Any]]:
                                 "cover_url": None,
                                 "cover_expires_at": None,
                                 "images": [],
-                                "is_archived": library_state_by_book_id.get(book_id, False),
+                                "is_archived": library_state_by_book_id.get(book_id, {}).get(
+                                    "is_archived", False
+                                ),
+                                "is_favorite": library_state_by_book_id.get(book_id, {}).get(
+                                    "is_favorite", False
+                                ),
                             }
 
                         # Add image to the book's images
@@ -595,7 +672,14 @@ def get_book_list() -> List[Dict[str, Any]]:
             for book in books_list:
                 book["images"].sort(key=lambda x: x["page"])
                 book["is_archived"] = bool(
-                    library_state_by_book_id.get(book["book_id"], book.get("is_archived", False))
+                    library_state_by_book_id.get(book["book_id"], {}).get(
+                        "is_archived", book.get("is_archived", False)
+                    )
+                )
+                book["is_favorite"] = bool(
+                    library_state_by_book_id.get(book["book_id"], {}).get(
+                        "is_favorite", book.get("is_favorite", False)
+                    )
                 )
 
             return books_list
@@ -668,8 +752,10 @@ def get_book_list() -> List[Dict[str, Any]]:
                             and isinstance(page_data.get("page_number"), int)
                         ],
                         "is_archived": get_book_library_state(str(book_data["book_id"])).get(
-                            "is_archived",
-                            False,
+                            "is_archived", False
+                        ),
+                        "is_favorite": get_book_library_state(str(book_data["book_id"])).get(
+                            "is_favorite", False
                         ),
                     }
                 )
@@ -754,6 +840,7 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
                 "cover": cover,
                 "images": images,
                 "is_archived": get_book_library_state(book_id).get("is_archived", False),
+                "is_favorite": get_book_library_state(book_id).get("is_favorite", False),
             }
         else:
             # Use local storage logic
@@ -812,6 +899,7 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
                 "cover": cover,
                 "images": images,
                 "is_archived": get_book_library_state(book_id).get("is_archived", False),
+                "is_favorite": get_book_library_state(book_id).get("is_favorite", False),
             }
 
     except ValueError as e:

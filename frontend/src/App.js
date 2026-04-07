@@ -36,6 +36,16 @@ const areBookIdListsEqual = (left = [], right = []) =>
 
 const SHELF_COVER_WARM_CONCURRENCY = 2;
 
+const normalizeLibraryFlags = (bookData = {}) => {
+  const isArchived = Boolean(bookData.is_archived);
+  const isFavorite = isArchived ? false : Boolean(bookData.is_favorite);
+
+  return {
+    is_archived: isArchived,
+    is_favorite: isFavorite,
+  };
+};
+
 const normalizeBook = (bookData = {}) => ({
   ...bookData,
   book_id: bookData.book_id,
@@ -53,8 +63,29 @@ const normalizeBook = (bookData = {}) => ({
     bookData.cover_source_kind ??
     (bookData.cover_url ?? bookData.remote_cover_url ?? bookData.cover?.url ? "remote" : "none"),
   images: bookData.images ?? [],
-  is_archived: Boolean(bookData.is_archived),
+  ...normalizeLibraryFlags(bookData),
 });
+
+const applyLibraryStateRules = (bookData = {}, updates = {}) => {
+  const nextBook = {
+    ...bookData,
+    ...normalizeLibraryFlags(bookData),
+    ...(updates.is_archived !== undefined ? { is_archived: Boolean(updates.is_archived) } : {}),
+    ...(updates.is_favorite !== undefined ? { is_favorite: Boolean(updates.is_favorite) } : {}),
+  };
+
+  if (updates.is_archived === true) {
+    nextBook.is_favorite = false;
+  } else if (updates.is_favorite === true) {
+    nextBook.is_archived = false;
+  } else if (nextBook.is_archived) {
+    nextBook.is_favorite = false;
+  } else if (nextBook.is_favorite) {
+    nextBook.is_archived = false;
+  }
+
+  return nextBook;
+};
 
 const mergeShelfCoverUrls = (books, coverMap) => {
   let changed = false;
@@ -111,7 +142,7 @@ const App = () => {
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryError, setLibraryError] = useState(false);
   const [activeFullBookWorkCount, setActiveFullBookWorkCount] = useState(0);
-  const [archiveActionBookIds, setArchiveActionBookIds] = useState([]);
+  const [pendingLibraryStateBookIds, setPendingLibraryStateBookIds] = useState([]);
   const [, setVisibleBookIds] = useState([]);
   const libraryFetchPromiseRef = useRef(null);
   const cachedBookObjectUrlsRef = useRef([]);
@@ -271,6 +302,7 @@ const App = () => {
       cover_url: data.cover?.url ?? data.cover_url ?? null,
       images: data.images ?? bookData.images ?? [],
       is_archived: Boolean(data.is_archived ?? bookData.is_archived),
+      is_favorite: Boolean(data.is_favorite ?? bookData.is_favorite),
     };
   };
 
@@ -496,6 +528,7 @@ const App = () => {
           ...bookData,
           cover_url: data.cover?.url ?? data.cover_url ?? null,
           is_archived: Boolean(data.is_archived ?? bookData.is_archived),
+          is_favorite: Boolean(data.is_favorite ?? bookData.is_favorite),
         });
 
         openBook(completeBookData);
@@ -517,39 +550,40 @@ const App = () => {
     setBook(null);
   };
 
-  const handleToggleArchive = async (bookId, isArchived) => {
+  const handleUpdateLibraryState = async (bookId, updates) => {
     if (!bookId) {
       return;
     }
 
-    setArchiveActionBookIds((current) =>
+    setPendingLibraryStateBookIds((current) =>
       current.includes(bookId) ? current : [...current, bookId],
     );
 
     const previousBook = libraryBooks.find((entry) => entry.book_id === bookId) ?? null;
+    const optimisticBook = previousBook ? normalizeBook(applyLibraryStateRules(previousBook, updates)) : null;
 
     setLibraryBooks((currentBooks) =>
       sortBooksByTitle(
         currentBooks.map((entry) =>
-          entry.book_id === bookId ? { ...entry, is_archived: isArchived } : entry,
+          entry.book_id === bookId ? normalizeBook(applyLibraryStateRules(entry, updates)) : entry,
         ),
       ),
     );
     setBook((currentBook) =>
       currentBook?.book_id === bookId
-        ? { ...currentBook, is_archived: isArchived }
+        ? normalizeBook(applyLibraryStateRules(currentBook, updates))
         : currentBook,
     );
 
     try {
-      const response = await fetch(buildApiUrl(`/books/${bookId}/archive/`), {
+      const response = await fetch(buildApiUrl(`/books/${bookId}/library-state/`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_archived: isArchived }),
+        body: JSON.stringify(updates),
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to update archive state. status=${response.status}`);
+        throw new Error(`Failed to update library state. status=${response.status}`);
       }
 
       const updatedBook = normalizeBook(await response.json());
@@ -561,12 +595,12 @@ const App = () => {
         ),
       );
       setBook((currentBook) =>
-        currentBook?.book_id === bookId
-          ? { ...currentBook, ...updatedBook }
-          : currentBook,
+          currentBook?.book_id === bookId
+            ? { ...currentBook, ...updatedBook }
+            : currentBook,
       );
     } catch (error) {
-      console.error(`Failed to update archive state for book ${bookId}:`, error);
+      console.error(`Failed to update library state for book ${bookId}:`, error);
       if (previousBook) {
         setLibraryBooks((currentBooks) =>
           sortBooksByTitle(
@@ -580,10 +614,16 @@ const App = () => {
             ? { ...currentBook, ...previousBook }
             : currentBook,
         );
+      } else if (optimisticBook) {
+        setBook((currentBook) =>
+          currentBook?.book_id === bookId
+            ? { ...currentBook, ...optimisticBook }
+            : currentBook,
+        );
       }
-      alert("Error updating archive state. Please try again.");
+      alert("Error updating library state. Please try again.");
     } finally {
-      setArchiveActionBookIds((current) => current.filter((entry) => entry !== bookId));
+      setPendingLibraryStateBookIds((current) => current.filter((entry) => entry !== bookId));
     }
   };
 
@@ -664,8 +704,8 @@ const App = () => {
         onRetry={() => fetchLibraryBooks({ force: true })}
         onSelectBook={handleSelectBook}
         onVisibleBooksChange={handleVisibleBooksChange}
-        onToggleArchive={handleToggleArchive}
-        archiveActionBookIds={archiveActionBookIds}
+        onUpdateLibraryState={handleUpdateLibraryState}
+        pendingLibraryStateBookIds={pendingLibraryStateBookIds}
       />
 
       {isModalOpen && book && (

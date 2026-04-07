@@ -74,7 +74,7 @@ const baseProps = {
   error: false,
   onRetry: jest.fn(),
   onSelectBook: jest.fn(),
-  onToggleArchive: jest.fn(),
+  onUpdateLibraryState: jest.fn(),
 };
 
 const renderBookList = (books) =>
@@ -105,11 +105,12 @@ describe("BookList", () => {
     ]);
 
     expect(screen.getByRole("tab", { name: /book shelf/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /favorites/i })).toHaveAttribute("aria-selected", "false");
     expect(screen.getByRole("tab", { name: /archive/i })).toHaveAttribute("aria-selected", "false");
     expect(screen.getByRole("button", { name: exactName("Default Shelf Book") })).toBeInTheDocument();
   });
 
-  test("uses a shared label wrapper and consistent tab height for both tabs", () => {
+  test("uses a shared label wrapper and consistent tab height for all tabs", () => {
     renderBookList([
       {
         book_id: "book-shared-label",
@@ -119,19 +120,26 @@ describe("BookList", () => {
     ]);
 
     const shelfTab = screen.getByRole("tab", { name: /book shelf/i });
+    const favoritesTab = screen.getByRole("tab", { name: /favorites/i });
     const archiveTab = screen.getByRole("tab", { name: /archive/i });
     const shelfLabel = shelfTab.querySelector("span");
+    const favoritesLabel = favoritesTab.querySelector("span");
     const archiveLabel = archiveTab.querySelector("span");
 
     expect(shelfLabel.tagName).toBe("SPAN");
+    expect(favoritesLabel.tagName).toBe("SPAN");
     expect(archiveLabel.tagName).toBe("SPAN");
     expect(shelfTab).toContainElement(shelfLabel);
+    expect(favoritesTab).toContainElement(favoritesLabel);
     expect(archiveTab).toContainElement(archiveLabel);
     expect(shelfTab).toHaveStyle({ display: "flex", alignItems: "center", justifyContent: "center" });
+    expect(favoritesTab).toHaveStyle({ display: "flex", alignItems: "center", justifyContent: "center" });
     expect(archiveTab).toHaveStyle({ display: "flex", alignItems: "center", justifyContent: "center" });
     expect(shelfTab.style.height).toBe("52px");
+    expect(favoritesTab.style.height).toBe("52px");
     expect(archiveTab.style.height).toBe("52px");
     expect(shelfLabel).toHaveStyle({ minHeight: "100%" });
+    expect(favoritesLabel).toHaveStyle({ minHeight: "100%" });
     expect(archiveLabel).toHaveStyle({ minHeight: "100%" });
   });
 
@@ -146,14 +154,18 @@ describe("BookList", () => {
 
     const bridge = screen.getByTestId("active-tab-bridge");
     const shelfTab = screen.getByRole("tab", { name: /book shelf/i });
+    const favoritesTab = screen.getByRole("tab", { name: /favorites/i });
     const archiveTab = screen.getByRole("tab", { name: /archive/i });
 
     expect(bridge).toHaveStyle({ bottom: "-8px", height: "12px" });
     expect(shelfTab.style.transform).toBe("");
+    expect(favoritesTab.style.transform).toBe("");
     expect(archiveTab.style.transform).toBe("");
     expect(shelfTab.style.top).toBe("");
+    expect(favoritesTab.style.top).toBe("");
     expect(archiveTab.style.top).toBe("");
     expect(shelfTab.querySelector("span")).not.toHaveStyle({ transform: expect.any(String) });
+    expect(favoritesTab.querySelector("span")).not.toHaveStyle({ transform: expect.any(String) });
     expect(archiveTab.querySelector("span")).not.toHaveStyle({ transform: expect.any(String) });
   });
 
@@ -279,7 +291,7 @@ describe("BookList", () => {
     fireEvent.click(screen.getByRole("tab", { name: /archive/i }));
 
     const button = screen.getByRole("button", { name: exactName("Archived Colors") });
-    expect(button).toHaveStyle({ backgroundColor: "#CA054D" });
+    expect(button).toHaveStyle({ backgroundColor: "#36839b" });
     expect(within(button).getByText("Archived Colors")).toHaveStyle({ color: "#FFCC00" });
   });
 
@@ -327,7 +339,7 @@ describe("BookList", () => {
 
   test("archives from the card action without selecting the book", () => {
     const onSelectBook = jest.fn();
-    const onToggleArchive = jest.fn();
+    const onUpdateLibraryState = jest.fn();
 
     render(
       <BookList
@@ -340,15 +352,72 @@ describe("BookList", () => {
           },
         ]}
         onSelectBook={onSelectBook}
-        onToggleArchive={onToggleArchive}
+        onUpdateLibraryState={onUpdateLibraryState}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /more actions for archive me/i }));
     fireEvent.click(screen.getByRole("button", { name: /move to archive/i }));
 
-    expect(onToggleArchive).toHaveBeenCalledWith("book-archive", true);
+    expect(onUpdateLibraryState).toHaveBeenCalledWith("book-archive", { is_archived: true });
     expect(onSelectBook).not.toHaveBeenCalled();
+  });
+
+  test("favorites from the card action without selecting the book", () => {
+    const onSelectBook = jest.fn();
+    const onUpdateLibraryState = jest.fn();
+
+    render(
+      <BookList
+        {...baseProps}
+        books={[
+          {
+            book_id: "book-favorite",
+            book_title: "Favorite Me",
+            is_archived: false,
+            is_favorite: false,
+          },
+        ]}
+        onSelectBook={onSelectBook}
+        onUpdateLibraryState={onUpdateLibraryState}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /more actions for favorite me/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add to favorites/i }));
+
+    expect(onUpdateLibraryState).toHaveBeenCalledWith("book-favorite", { is_favorite: true });
+    expect(onSelectBook).not.toHaveBeenCalled();
+  });
+
+  test("favoriting an archived stale favorite state still sends add-to-favorites", () => {
+    const onUpdateLibraryState = jest.fn();
+
+    render(
+      <BookList
+        {...baseProps}
+        books={[
+          {
+            book_id: "book-archive-favorite-stale",
+            book_title: "Archived Stale Favorite",
+            is_archived: true,
+            is_favorite: true,
+          },
+        ]}
+        onUpdateLibraryState={onUpdateLibraryState}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: /archive/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more actions for archived stale favorite/i }));
+
+    expect(screen.getByRole("button", { name: /add to favorites/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /add to favorites/i }));
+
+    expect(onUpdateLibraryState).toHaveBeenCalledWith("book-archive-favorite-stale", {
+      is_favorite: true,
+    });
   });
 
   test("flips a card open and closed without opening the book", () => {
@@ -418,7 +487,7 @@ describe("BookList", () => {
     expect(screen.getByRole("button", { name: /return to cover for second book/i })).toBeInTheDocument();
   });
 
-  test("switches to Archive and back to Book Shelf", () => {
+  test("switches across Book Shelf, Favorites, and Archive", () => {
     matchMediaController.setMatches(mobileGridQuery, true);
 
     renderBookList([
@@ -426,31 +495,53 @@ describe("BookList", () => {
         book_id: "book-6",
         book_title: "Archive Toggle Book",
         is_archived: false,
+        is_favorite: false,
+      },
+      {
+        book_id: "book-6b",
+        book_title: "Favorite Shelf Book",
+        is_archived: false,
+        is_favorite: true,
       },
       {
         book_id: "book-7",
         book_title: "Archived Book",
         is_archived: true,
+        is_favorite: true,
       },
     ]);
 
     expect(screen.getByRole("list")).toHaveStyle({ gridTemplateColumns: "1fr" });
+
+    fireEvent.click(screen.getByRole("tab", { name: /favorites/i }));
+
+    expect(screen.getByRole("tab", { name: /favorites/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: exactName("Favorite Shelf Book") })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: exactName("Archive Toggle Book") })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: exactName("Archived Book") })).not.toBeInTheDocument();
+    const favoriteFrontButton = screen.getByRole("button", { name: exactName("Favorite Shelf Book") });
+    expect(favoriteFrontButton).toHaveStyle({
+      backgroundColor: "#CA054D",
+    });
+    expect(within(favoriteFrontButton).getByText("Favorite Shelf Book")).toHaveStyle({ color: "#FFCC00" });
 
     fireEvent.click(screen.getByRole("tab", { name: /archive/i }));
 
     expect(screen.getByRole("tab", { name: /archive/i })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("button", { name: exactName("Archived Book") })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: exactName("Archive Toggle Book") })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: exactName("Favorite Shelf Book") })).not.toBeInTheDocument();
     expect(screen.getByRole("list")).toHaveStyle({ gridTemplateColumns: "1fr" });
     const archivedFrontButton = screen.getByRole("button", { name: exactName("Archived Book") });
     expect(archivedFrontButton).toHaveStyle({
-      backgroundColor: "#CA054D",
+      backgroundColor: "#36839b",
     });
     expect(within(archivedFrontButton).getByText("Archived Book")).toHaveStyle({ color: "#FFCC00" });
 
     fireEvent.click(screen.getByRole("button", { name: /more actions for archived book/i }));
     expect(screen.getByRole("button", { name: /restore to book shelf/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /restore to book shelf/i }).previousSibling).toHaveStyle({
+    expect(screen.getByRole("button", { name: /add to favorites/i })).toBeInTheDocument();
+    expect(screen.getAllByText("Archived Book")[1]).toHaveStyle({
       color: "#FFCC00",
     });
     expect(screen.getByRole("button", { name: /return to cover for archived book/i })).toHaveStyle({
@@ -466,12 +557,14 @@ describe("BookList", () => {
 
     expect(screen.getByRole("tab", { name: /book shelf/i })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("button", { name: exactName("Archive Toggle Book") })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: exactName("Favorite Shelf Book") })).toBeInTheDocument();
   });
 
   test("renders loading state inline with tabs visible", () => {
     render(<BookList {...baseProps} books={[]} loading />);
 
     expect(screen.getByRole("tab", { name: /book shelf/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /favorites/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /archive/i })).toBeInTheDocument();
     expect(screen.getByText("Loading books...")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /close modal/i })).not.toBeInTheDocument();
@@ -483,12 +576,28 @@ describe("BookList", () => {
     render(<BookList {...baseProps} books={[]} error onRetry={onRetry} />);
 
     expect(screen.getByRole("tab", { name: /book shelf/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /favorites/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /archive/i })).toBeInTheDocument();
     expect(screen.getByText("Error fetching books. Please try again later.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
 
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  test("shows the favorites empty state text", () => {
+    renderBookList([
+      {
+        book_id: "book-non-favorite",
+        book_title: "Not Favorite",
+        is_archived: false,
+        is_favorite: false,
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("tab", { name: /favorites/i }));
+
+    expect(screen.getByText("You don't have any Favorites yet.")).toBeInTheDocument();
   });
 
   test("equalizes card heights within each desktop row only", async () => {
