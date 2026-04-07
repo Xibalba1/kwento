@@ -507,6 +507,7 @@ const App = () => {
       setBook(null);
       alert("Error generating book. Please try again.");
     } finally {
+      setTheme("");
       setLoading(false);
     }
   };

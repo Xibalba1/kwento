@@ -48,6 +48,7 @@ const createDeferred = () => {
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.alert = jest.fn();
   global.URL.createObjectURL = jest.fn((value) => `blob:${String(value)}`);
   global.URL.revokeObjectURL = jest.fn();
   mockEnforceCacheBudget.mockResolvedValue(undefined);
@@ -289,6 +290,151 @@ test("deduplicates repeated clicks while the same book is still opening", async 
   await waitFor(() => {
     expect(global.fetch).toHaveBeenCalledTimes(3);
   });
+});
+
+test("disables generation controls while a book is generating", async () => {
+  const generateRequest = createDeferred();
+
+  global.fetch
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => [],
+    })
+    .mockReturnValueOnce(generateRequest.promise);
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  const themeInput = screen.getByPlaceholderText(/enter a theme for your book/i);
+  const generateButton = screen.getByRole("button", { name: /generate book/i });
+
+  fireEvent.change(themeInput, { target: { value: "Sky pirates" } });
+
+  await act(async () => {
+    fireEvent.click(generateButton);
+  });
+
+  expect(generateButton).toBeDisabled();
+  expect(screen.getByRole("button", { name: /generating/i })).toBeDisabled();
+  expect(themeInput).toBeDisabled();
+  expect(themeInput).toHaveStyle({
+    backgroundColor: "#E5E7EB",
+    color: "#4B5563",
+    cursor: "not-allowed",
+    opacity: "1",
+  });
+  expect(themeInput).toHaveValue("Sky pirates");
+});
+
+test("clears the theme after a successful generation", async () => {
+  global.fetch
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => [],
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        book_id: "generated-book-1",
+        book_title: "Generated Book",
+        json_url: "https://example.com/generated-book-1.json",
+        cover: {
+          url: "https://example.com/generated-book-1-cover.png",
+        },
+        images: [],
+        is_archived: false,
+      }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        pages: [
+          {
+            page_number: 1,
+            content: {
+              text_content_of_this_page: "Generated page text",
+            },
+          },
+        ],
+      }),
+    });
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  const themeInput = screen.getByPlaceholderText(/enter a theme for your book/i);
+
+  fireEvent.change(themeInput, { target: { value: "Moonlit jungle" } });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /generate book/i }));
+  });
+
+  await waitFor(() => {
+    expect(global.fetch).toHaveBeenNthCalledWith(2, "http://localhost/books/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ theme: "Moonlit jungle" }),
+    });
+  });
+
+  await screen.findByRole("button", { name: /close modal/i });
+  expect(themeInput).toHaveValue("");
+});
+
+test("clears the theme after a failed generation request", async () => {
+  global.fetch
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => [],
+    })
+    .mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({}),
+    });
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  const themeInput = screen.getByPlaceholderText(/enter a theme for your book/i);
+
+  fireEvent.change(themeInput, { target: { value: "Stormy forest" } });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /generate book/i }));
+  });
+
+  await waitFor(() => {
+    expect(window.alert).toHaveBeenCalledWith("Error generating book. Please try again.");
+  });
+  expect(themeInput).toHaveValue("");
+});
+
+test("does not clear the theme when empty-theme validation blocks generation", async () => {
+  global.fetch.mockResolvedValueOnce({
+    ok: true,
+    json: async () => [],
+  });
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  const themeInput = screen.getByPlaceholderText(/enter a theme for your book/i);
+  const generateButton = screen.getByRole("button", { name: /generate book/i });
+
+  fireEvent.change(themeInput, { target: { value: "   " } });
+
+  await act(async () => {
+    fireEvent.click(generateButton);
+  });
+
+  expect(window.alert).toHaveBeenCalledWith("Please enter a theme to generate a book.");
+  expect(themeInput).toHaveValue("   ");
+  expect(global.fetch).toHaveBeenCalledTimes(1);
 });
 
 test("revokes cached book object URLs when the modal closes, not when it opens", async () => {

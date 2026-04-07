@@ -10,6 +10,7 @@ const TAB_BAR_SIDE_PADDING = 18;
 const TAB_HEIGHT = 52;
 const TAB_BAR_OVERLAP = 8;
 const ACTIVE_TAB_BRIDGE_HEIGHT = 12;
+const MOBILE_GRID_MEDIA_QUERY = "(max-width: 600px)";
 
 const usePrefersReducedMotion = () => {
   const getPreference = () =>
@@ -41,6 +42,38 @@ const usePrefersReducedMotion = () => {
   }, []);
 
   return prefersReducedMotion;
+};
+
+const useIsMobileGrid = () => {
+  const getPreference = () =>
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(MOBILE_GRID_MEDIA_QUERY).matches;
+
+  const [isMobileGrid, setIsMobileGrid] = useState(getPreference);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia(MOBILE_GRID_MEDIA_QUERY);
+    const handleChange = (event) => {
+      setIsMobileGrid(event.matches);
+    };
+
+    setIsMobileGrid(mediaQuery.matches);
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    }
+
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
+  }, []);
+
+  return isMobileGrid;
 };
 
 const BookCoverImage = ({ bookId, coverUrl, sourceKind, bookTitle, onSizeChange }) => {
@@ -139,40 +172,92 @@ const BookList = ({
   archiveActionBookIds = [],
 }) => {
   const buttonRefs = useRef({});
+  const cardInnerRefs = useRef({});
   const itemRefs = useRef({});
-  const [maxButtonHeight, setMaxButtonHeight] = useState(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
   const [activeTab, setActiveTab] = useState(BOOK_SHELF_TAB);
   const [flippedBookId, setFlippedBookId] = useState(null);
   const prefersReducedMotion = usePrefersReducedMotion();
+  const isMobileGrid = useIsMobileGrid();
   const pendingArchiveBookIds = new Set(archiveActionBookIds);
   const visibleBooks = books.filter((book) =>
     activeTab === BOOK_SHELF_TAB ? !book.is_archived : book.is_archived,
   );
 
   useLayoutEffect(() => {
-    if (activeTab !== BOOK_SHELF_TAB || visibleBooks.length === 0) {
-      setMaxButtonHeight(null);
+    if (visibleBooks.length === 0) {
       return;
     }
 
-    const buttons = Object.values(buttonRefs.current).filter(Boolean);
-    if (buttons.length === 0) {
+    const buttonEntries = visibleBooks
+      .map((book) => ({
+        bookId: book.book_id,
+        button: buttonRefs.current[book.book_id] ?? null,
+        cardInner: cardInnerRefs.current[book.book_id] ?? null,
+      }))
+      .filter((entry) => entry.button && entry.cardInner);
+
+    if (buttonEntries.length === 0) {
       return;
     }
 
-    buttons.forEach((button) => {
+    buttonEntries.forEach(({ button, cardInner }) => {
       button.style.height = "auto";
+      cardInner.style.height = "auto";
     });
 
-    const tallestHeight = Math.ceil(
-      Math.max(...buttons.map((button) => button.getBoundingClientRect().height)),
-    );
+    const measuredEntries = buttonEntries
+      .map(({ bookId, button }) => {
+        const rect = button.getBoundingClientRect();
+        return {
+          bookId,
+          height: Math.ceil(rect.height),
+          top: rect.top,
+          left: rect.left,
+        };
+      })
+      .sort((left, right) => {
+        if (left.top !== right.top) {
+          return left.top - right.top;
+        }
+        return left.left - right.left;
+      });
 
-    setMaxButtonHeight((currentHeight) =>
-      currentHeight === tallestHeight ? currentHeight : tallestHeight,
-    );
-  }, [activeTab, books, layoutVersion, visibleBooks.length]);
+    const rowTolerance = 4;
+    const rows = [];
+    measuredEntries.forEach((entry) => {
+      const row = rows.find((candidate) => Math.abs(candidate.top - entry.top) <= rowTolerance);
+      if (row) {
+        row.entries.push(entry);
+        row.maxHeight = Math.max(row.maxHeight, entry.height);
+        return;
+      }
+
+      rows.push({
+        top: entry.top,
+        maxHeight: entry.height,
+        entries: [entry],
+      });
+    });
+
+    const heightByBookId = rows.reduce((heights, row) => {
+      row.entries.forEach((entry) => {
+        heights[entry.bookId] = row.maxHeight;
+      });
+      return heights;
+    }, {});
+
+    buttonEntries.forEach(({ bookId, button, cardInner }) => {
+      const nextHeight = heightByBookId[bookId];
+      if (!nextHeight) {
+        return;
+      }
+
+      const heightValue = `${nextHeight}px`;
+      button.style.height = heightValue;
+      cardInner.style.height = heightValue;
+    });
+  }, [activeTab, books, layoutVersion, visibleBooks]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -321,7 +406,12 @@ const BookList = ({
     }
 
     return (
-      <ul style={styles.list}>
+      <ul
+        style={{
+          ...styles.list,
+          ...(isMobileGrid ? styles.mobileList : {}),
+        }}
+      >
         {visibleBooks.map((book) => (
           <li
             key={book.book_id}
@@ -343,6 +433,14 @@ const BookList = ({
               }}
             >
               <div
+                ref={(element) => {
+                  if (element) {
+                    cardInnerRefs.current[book.book_id] = element;
+                    return;
+                  }
+
+                  delete cardInnerRefs.current[book.book_id];
+                }}
                 style={{
                   ...styles.cardInner,
                   ...(flippedBookId === book.book_id
@@ -350,7 +448,6 @@ const BookList = ({
                       ? styles.cardInnerReducedMotionFlipped
                       : styles.cardInnerFlipped
                     : {}),
-                  height: maxButtonHeight ? `${maxButtonHeight}px` : "auto",
                 }}
               >
                 <div
@@ -377,13 +474,20 @@ const BookList = ({
                     aria-label={book.book_title}
                     style={{
                       ...styles.bookButton,
-                      height: maxButtonHeight ? `${maxButtonHeight}px` : "auto",
+                      ...(activeTab === ARCHIVE_TAB ? styles.archiveBookButton : {}),
                     }}
                     onClick={() => {
                       onSelectBook(book.book_id);
                     }}
                   >
-                    <span style={styles.bookTitle}>{book.book_title}</span>
+                    <span
+                      style={{
+                        ...styles.bookTitle,
+                        ...(activeTab === ARCHIVE_TAB ? styles.archiveBookTitle : {}),
+                      }}
+                    >
+                      {book.book_title}
+                    </span>
                     <div style={styles.coverSlot}>
                       <BookCoverImage
                         bookId={book.book_id}
@@ -397,7 +501,10 @@ const BookList = ({
                   <button
                     type="button"
                     aria-label={`More actions for ${book.book_title}`}
-                    style={styles.frontActionButton}
+                    style={{
+                      ...styles.frontActionButton,
+                      ...(activeTab === ARCHIVE_TAB ? styles.archiveFrontActionButton : {}),
+                    }}
                     onClick={(event) => handleFlipToggle(event, book.book_id)}
                   >
                     <span style={styles.materialSymbol}>more_vert</span>
@@ -408,6 +515,7 @@ const BookList = ({
                   style={{
                     ...styles.cardFace,
                     ...styles.cardBack,
+                    ...(activeTab === ARCHIVE_TAB ? styles.archiveCardBack : {}),
                     ...(prefersReducedMotion ? styles.cardBackReducedMotion : {}),
                     ...(prefersReducedMotion
                       ? flippedBookId === book.book_id
@@ -419,16 +527,29 @@ const BookList = ({
                   <button
                     type="button"
                     aria-label={`Return to cover for ${book.book_title}`}
-                    style={styles.backActionButton}
+                    style={{
+                      ...styles.backActionButton,
+                      ...(activeTab === ARCHIVE_TAB ? styles.archiveBackActionButton : {}),
+                    }}
                     onClick={(event) => handleFlipToggle(event, book.book_id)}
                   >
                     <span style={styles.materialSymbol}>undo</span>
                   </button>
                   <div style={styles.backContent}>
-                    <p style={styles.backTitle}>{book.book_title}</p>
+                    <p
+                      style={{
+                        ...styles.backTitle,
+                        ...(activeTab === ARCHIVE_TAB ? styles.archiveBackTitle : {}),
+                      }}
+                    >
+                      {book.book_title}
+                    </p>
                     <button
                       type="button"
-                      style={styles.menuActionButton}
+                      style={{
+                        ...styles.menuActionButton,
+                        ...(activeTab === ARCHIVE_TAB ? styles.archiveMenuActionButton : {}),
+                      }}
                       disabled={pendingArchiveBookIds.has(book.book_id)}
                       onClick={(event) => handleArchiveAction(event, book)}
                     >
@@ -604,6 +725,9 @@ const styles = {
     padding: 0,
     margin: 0,
   },
+  mobileList: {
+    gridTemplateColumns: "1fr",
+  },
   listItem: {
     display: "flex",
   },
@@ -657,7 +781,7 @@ const styles = {
     flexDirection: 'column',
     width: "100%",
     minHeight: '220px',
-    padding: "16px",
+    padding: "16px 16px 24px 24px",
     backgroundColor: "#FFCC00",
     border: "none",
     borderRadius: "8px",
@@ -669,15 +793,18 @@ const styles = {
     position: "relative",
     outline: "none",
   },
+  archiveBookButton: {
+    backgroundColor: "#CA054D",
+  },
   frontActionButton: {
     position: "absolute",
-    top: "10px",
-    right: "10px",
+    bottom: "10px",
+    left: "10px",
     width: "42px",
     height: "42px",
     border: "none",
     borderRadius: "999px",
-    backgroundColor: "rgba(202, 5, 77, 0.3)",
+    backgroundColor: "rgba(202, 5, 77, 0.24)",
     color: "#FFFCF0",
     backdropFilter: "blur(4px)",
     WebkitBackdropFilter: "blur(4px)",
@@ -687,6 +814,10 @@ const styles = {
     justifyContent: "center",
     zIndex: 2,
   },
+  archiveFrontActionButton: {
+    backgroundColor: "rgba(255, 204, 0, 0.2)",
+    color: "#FFCC00",
+  },
   bookTitle: {
     fontSize: "20px",
     color: "#CA054D",
@@ -694,6 +825,9 @@ const styles = {
     overflowWrap: "break-word",
     width: '100%',
     flexShrink: 0,
+  },
+  archiveBookTitle: {
+    color: "#FFCC00",
   },
   coverSlot: {
     width: "100%",
@@ -732,6 +866,9 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
   },
+  archiveCardBack: {
+    background: "linear-gradient(160deg, rgba(202, 5, 77, 0.98), rgba(138, 0, 51, 0.98))",
+  },
   cardBackReducedMotion: {
     transform: "none",
   },
@@ -749,6 +886,9 @@ const styles = {
     fontWeight: "600",
     textAlign: "center",
   },
+  archiveBackTitle: {
+    color: "#FFCC00",
+  },
   backActionButton: {
     position: "absolute",
     top: "10px",
@@ -764,6 +904,10 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
   },
+  archiveBackActionButton: {
+    backgroundColor: "#FFCC00",
+    color: "#CA054D",
+  },
   menuActionButton: {
     width: "100%",
     maxWidth: "220px",
@@ -775,6 +919,10 @@ const styles = {
     fontSize: "15px",
     fontWeight: "700",
     cursor: "pointer",
+  },
+  archiveMenuActionButton: {
+    backgroundColor: "#FFCC00",
+    color: "#CA054D",
   },
   materialSymbol: {
     fontFamily: '"Material Symbols Outlined"',
