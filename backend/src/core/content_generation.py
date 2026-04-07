@@ -621,7 +621,7 @@ async def generate_book(theme: str, request_id: Optional[str] = None) -> Book:
                     "prompt_path_version": prompt_path_version,
                 },
             )
-            save_book_library_state(book_id_str, False)
+            save_book_library_state(book_id_str, is_archived=False, is_favorite=False)
             _capture_stage_duration(stage_timings, "book_json_persist", stage_started)
             progress.mark_work_completed(1.0, note="Book JSON persisted.")
 

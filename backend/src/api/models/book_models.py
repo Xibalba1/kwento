@@ -200,13 +200,15 @@ class BookResponse(BaseModel):
     json_url: str  # Pre-signed URL for the book's JSON metadata
     cover: Optional[CoverResponse] = None
     is_archived: bool = False
+    is_favorite: bool = False
     images: List[
         ImageResponse
     ]  # List of images with their URLs and expiration metadata
 
 
-class ArchiveBookRequest(BaseModel):
-    is_archived: bool
+class UpdateBookLibraryStateRequest(BaseModel):
+    is_archived: Optional[bool] = None
+    is_favorite: Optional[bool] = None
 
 
 # Add the following lines to resolve forward references
