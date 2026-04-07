@@ -135,12 +135,19 @@ describe("BookList", () => {
     expect(shelfTab).toHaveStyle({ display: "flex", alignItems: "center", justifyContent: "center" });
     expect(favoritesTab).toHaveStyle({ display: "flex", alignItems: "center", justifyContent: "center" });
     expect(archiveTab).toHaveStyle({ display: "flex", alignItems: "center", justifyContent: "center" });
+    expect(shelfTab.style.width).toBe("");
+    expect(shelfTab.style.flex).toBe("0 0 152px");
+    expect(favoritesTab.style.flex).toBe("0 0 152px");
+    expect(archiveTab.style.flex).toBe("0 0 152px");
     expect(shelfTab.style.height).toBe("52px");
     expect(favoritesTab.style.height).toBe("52px");
     expect(archiveTab.style.height).toBe("52px");
     expect(shelfLabel).toHaveStyle({ minHeight: "100%" });
     expect(favoritesLabel).toHaveStyle({ minHeight: "100%" });
     expect(archiveLabel).toHaveStyle({ minHeight: "100%" });
+    expect(shelfLabel).toHaveStyle({ whiteSpace: "nowrap" });
+    expect(favoritesLabel).toHaveStyle({ whiteSpace: "nowrap" });
+    expect(archiveLabel).toHaveStyle({ whiteSpace: "nowrap" });
   });
 
   test("keeps a shared active-tab bridge without inactive-only label offsets", () => {
@@ -158,6 +165,8 @@ describe("BookList", () => {
     const archiveTab = screen.getByRole("tab", { name: /archive/i });
 
     expect(bridge).toHaveStyle({ bottom: "-8px", height: "12px" });
+    expect(bridge.style.width).toBe("152px");
+    expect(bridge.style.left).toBe("18px");
     expect(shelfTab.style.transform).toBe("");
     expect(favoritesTab.style.transform).toBe("");
     expect(archiveTab.style.transform).toBe("");
@@ -167,6 +176,68 @@ describe("BookList", () => {
     expect(shelfTab.querySelector("span")).not.toHaveStyle({ transform: expect.any(String) });
     expect(favoritesTab.querySelector("span")).not.toHaveStyle({ transform: expect.any(String) });
     expect(archiveTab.querySelector("span")).not.toHaveStyle({ transform: expect.any(String) });
+  });
+
+  test("uses flexible tab sizing and smaller labels on mobile", () => {
+    matchMediaController.setMatches(mobileGridQuery, true);
+
+    renderBookList([
+      {
+        book_id: "mobile-tab-book",
+        book_title: "Mobile Tab Book",
+        is_archived: false,
+      },
+    ]);
+
+    const shelfTab = screen.getByRole("tab", { name: /book shelf/i });
+    const favoritesTab = screen.getByRole("tab", { name: /favorites/i });
+    const archiveTab = screen.getByRole("tab", { name: /archive/i });
+    const shelfLabel = shelfTab.querySelector("span");
+    const favoritesLabel = favoritesTab.querySelector("span");
+    const archiveLabel = archiveTab.querySelector("span");
+
+    expect(shelfTab.style.flex).toBe("1 1 0px");
+    expect(favoritesTab.style.flex).toBe("1 1 0px");
+    expect(archiveTab.style.flex).toBe("1 1 0px");
+    expect(shelfTab.style.minWidth).toBe("0");
+    expect(favoritesTab.style.minWidth).toBe("0");
+    expect(archiveTab.style.minWidth).toBe("0");
+    expect(shelfTab.style.padding).toBe("0px 10px");
+    expect(favoritesTab.style.padding).toBe("0px 10px");
+    expect(archiveTab.style.padding).toBe("0px 10px");
+    expect(shelfLabel.style.fontSize).toBe("14px");
+    expect(favoritesLabel.style.fontSize).toBe("14px");
+    expect(archiveLabel.style.fontSize).toBe("14px");
+    expect(shelfLabel).toHaveStyle({ whiteSpace: "nowrap" });
+    expect(favoritesLabel).toHaveStyle({ whiteSpace: "nowrap" });
+    expect(archiveLabel).toHaveStyle({ whiteSpace: "nowrap" });
+  });
+
+  test("uses responsive bridge sizing and offsets on mobile", () => {
+    matchMediaController.setMatches(mobileGridQuery, true);
+
+    renderBookList([
+      {
+        book_id: "mobile-bridge-book",
+        book_title: "Mobile Bridge Book",
+        is_archived: false,
+      },
+    ]);
+
+    const bridge = screen.getByTestId("active-tab-bridge");
+    const tabList = screen.getByRole("tablist", { name: /book list sections/i });
+
+    expect(tabList).toHaveStyle({ boxSizing: "border-box" });
+    expect(bridge.style.width).toBe("calc(33.333333% - 5.333333px)");
+    expect(bridge.style.left).toBe("18px");
+
+    fireEvent.click(screen.getByRole("tab", { name: /favorites/i }));
+    expect(screen.getByRole("tab", { name: /favorites/i })).toHaveAttribute("aria-selected", "true");
+    expect(bridge.style.left).toBe("calc(33.333333% + 2.666667px)");
+
+    fireEvent.click(screen.getByRole("tab", { name: /archive/i }));
+    expect(screen.getByRole("tab", { name: /archive/i })).toHaveAttribute("aria-selected", "true");
+    expect(bridge.style.left).toBe("calc(66.666667% - 12.666667px)");
   });
 
   test("uses two columns by default on desktop", () => {
