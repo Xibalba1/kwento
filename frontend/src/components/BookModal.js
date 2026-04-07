@@ -1,6 +1,6 @@
 // kwento/frontend/src/components/BookModal.js
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 const DEFAULT_ILLUSTRATION_ASPECT_RATIO = "4 / 3";
 
@@ -59,7 +59,7 @@ const BookModal = ({ book, onClose }) => {
     setCurrentPage(0); // Reset to first page when modal is closed
   };
 
-  const markIllustrationLoaded = (imageElement, nextIllustrationKey, nextPageNumber) => {
+  const markIllustrationLoaded = useCallback((imageElement, nextIllustrationKey, nextPageNumber) => {
     if (illustrationStatusesRef.current.get(nextIllustrationKey) === "loaded") {
       return;
     }
@@ -74,9 +74,9 @@ const BookModal = ({ book, onClose }) => {
     illustrationStatusesRef.current.set(nextIllustrationKey, "loaded");
     setIllustrationStatus("loaded");
     console.debug(`[BookModal] Illustration loaded for page ${nextPageNumber}`);
-  };
+  }, []);
 
-  const inspectIllustrationElement = (imageElement, nextIllustrationKey, nextPageNumber) => {
+  const inspectIllustrationElement = useCallback((imageElement, nextIllustrationKey, nextPageNumber) => {
     if (
       !imageElement ||
       illustrationStatusesRef.current.get(nextIllustrationKey) === "error"
@@ -87,7 +87,7 @@ const BookModal = ({ book, onClose }) => {
     if (imageElement.complete && imageElement.naturalWidth > 0 && imageElement.naturalHeight > 0) {
       markIllustrationLoaded(imageElement, nextIllustrationKey, nextPageNumber);
     }
-  };
+  }, [markIllustrationLoaded]);
 
   useEffect(() => {
     const knownDimensions = knownIllustrationDimensionsRef.current.get(illustrationKey) ?? null;
@@ -124,7 +124,13 @@ const BookModal = ({ book, onClose }) => {
     }
 
     inspectIllustrationElement(illustrationImageRef.current, illustrationKey, currentPageNumber);
-  }, [currentPageNumber, illustrationKey, illustrationStatus, illustrationUrl]);
+  }, [
+    currentPageNumber,
+    illustrationKey,
+    illustrationStatus,
+    illustrationUrl,
+    inspectIllustrationElement,
+  ]);
 
   // Early return if there's no book data
   if (!hasBook) {
