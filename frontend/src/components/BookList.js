@@ -11,6 +11,10 @@ const TAB_BAR_SIDE_PADDING = 18;
 const TAB_HEIGHT = 52;
 const TAB_BAR_OVERLAP = 8;
 const ACTIVE_TAB_BRIDGE_HEIGHT = 12;
+const TAB_OVERLAP = 10;
+const MOBILE_TAB_WIDTH = "calc(33.333333% - 5.333333px)";
+const MOBILE_TAB_FONT_SIZE = 14;
+const MOBILE_TAB_HORIZONTAL_PADDING = 10;
 const MOBILE_GRID_MEDIA_QUERY = "(max-width: 600px)";
 const CARD_CORNER_RADIUS = 14;
 
@@ -435,6 +439,49 @@ const BookList = ({
     };
   };
 
+  const tabOrder = [BOOK_SHELF_TAB, FAVORITES_TAB, ARCHIVE_TAB];
+  const activeTabIndex = Math.max(0, tabOrder.indexOf(activeTab));
+  const mobileTabWidth = MOBILE_TAB_WIDTH;
+  const mobileTabOffset =
+    activeTabIndex === 0
+      ? `${TAB_BAR_SIDE_PADDING}px`
+      : activeTabIndex === 1
+        ? "calc(33.333333% + 2.666667px)"
+        : "calc(66.666667% - 12.666667px)";
+  const tabBarStyle = {
+    ...styles.tabBar,
+    ...(isMobileGrid ? styles.mobileTabBar : {}),
+  };
+  const tabLabelStyle = {
+    ...styles.tabLabel,
+    ...(isMobileGrid ? styles.mobileTabLabel : {}),
+  };
+  const tabButtonStyle = (tab, accentStyles = {}) => ({
+    ...styles.tabButton,
+    ...(isMobileGrid ? styles.mobileTabButton : {}),
+    ...accentStyles,
+    ...(tab !== BOOK_SHELF_TAB ? styles.trailingTabButton : {}),
+    ...(activeTab !== tab ? styles.inactiveTabButton : {}),
+    ...(activeTab === tab ? styles.activeTabButton : {}),
+  });
+  const activeTabBridgeStyle = {
+    ...styles.activeTabBridge,
+    ...(getTabStyleSet(activeTab).bridge ?? {}),
+    ...(isMobileGrid
+      ? {
+          width: mobileTabWidth,
+          left: mobileTabOffset,
+        }
+      : {
+          left:
+            activeTab === BOOK_SHELF_TAB
+              ? TAB_BAR_SIDE_PADDING
+              : activeTab === FAVORITES_TAB
+                ? TAB_BAR_SIDE_PADDING + (TAB_WIDTH - TAB_OVERLAP)
+                : TAB_BAR_SIDE_PADDING + ((TAB_WIDTH - TAB_OVERLAP) * 2),
+        }),
+  };
+
   const renderContent = () => {
     if (loading) {
       return <p style={styles.message}>Loading books...</p>;
@@ -657,64 +704,35 @@ const BookList = ({
 
   return (
     <div style={styles.section}>
-      <div style={styles.tabBar} role="tablist" aria-label="Book list sections">
+      <div style={tabBarStyle} role="tablist" aria-label="Book list sections">
         <button
           type="button"
           role="tab"
           aria-selected={activeTab === BOOK_SHELF_TAB}
           onClick={() => setActiveTab(BOOK_SHELF_TAB)}
-          style={{
-            ...styles.tabButton,
-            ...(activeTab !== BOOK_SHELF_TAB ? styles.inactiveTabButton : {}),
-            ...(activeTab === BOOK_SHELF_TAB ? styles.activeTabButton : {}),
-          }}
+          style={tabButtonStyle(BOOK_SHELF_TAB)}
         >
-          <span style={styles.tabLabel}>Book Shelf</span>
+          <span style={tabLabelStyle}>Book Shelf</span>
         </button>
         <button
           type="button"
           role="tab"
           aria-selected={activeTab === FAVORITES_TAB}
           onClick={() => setActiveTab(FAVORITES_TAB)}
-          style={{
-            ...styles.tabButton,
-            ...styles.favoritesTabButton,
-            ...styles.trailingTabButton,
-            ...(activeTab !== FAVORITES_TAB ? styles.inactiveTabButton : {}),
-            ...(activeTab === FAVORITES_TAB ? styles.activeTabButton : {}),
-          }}
+          style={tabButtonStyle(FAVORITES_TAB, styles.favoritesTabButton)}
         >
-          <span style={styles.tabLabel}>Favorites</span>
+          <span style={tabLabelStyle}>Favorites</span>
         </button>
         <button
           type="button"
           role="tab"
           aria-selected={activeTab === ARCHIVE_TAB}
           onClick={() => setActiveTab(ARCHIVE_TAB)}
-          style={{
-            ...styles.tabButton,
-            ...styles.archiveTabButton,
-            ...styles.trailingTabButton,
-            ...(activeTab !== ARCHIVE_TAB ? styles.inactiveTabButton : {}),
-            ...(activeTab === ARCHIVE_TAB ? styles.activeTabButton : {}),
-          }}
+          style={tabButtonStyle(ARCHIVE_TAB, styles.archiveTabButton)}
         >
-          <span style={styles.tabLabel}>Archive</span>
+          <span style={tabLabelStyle}>Archive</span>
         </button>
-        <div
-          aria-hidden="true"
-          data-testid="active-tab-bridge"
-          style={{
-            ...styles.activeTabBridge,
-            ...(getTabStyleSet(activeTab).bridge ?? {}),
-            left:
-              activeTab === BOOK_SHELF_TAB
-                ? TAB_BAR_SIDE_PADDING
-                : activeTab === FAVORITES_TAB
-                  ? TAB_BAR_SIDE_PADDING + (TAB_WIDTH - 10)
-                  : TAB_BAR_SIDE_PADDING + ((TAB_WIDTH - 10) * 2),
-          }}
-        />
+        <div aria-hidden="true" data-testid="active-tab-bridge" style={activeTabBridgeStyle} />
       </div>
       <div
         style={{
@@ -743,6 +761,7 @@ const styles = {
     padding: `0 ${TAB_BAR_SIDE_PADDING}px`,
     marginBottom: `-${TAB_BAR_OVERLAP}px`,
     position: "relative",
+    boxSizing: "border-box",
   },
   tabButton: {
     flex: `0 0 ${TAB_WIDTH}px`,
@@ -775,9 +794,18 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     minHeight: "100%",
+    whiteSpace: "nowrap",
   },
   trailingTabButton: {
-    marginLeft: "-10px",
+    marginLeft: `-${TAB_OVERLAP}px`,
+  },
+  mobileTabButton: {
+    flex: "1 1 0",
+    minWidth: "0",
+    padding: `0 ${MOBILE_TAB_HORIZONTAL_PADDING}px`,
+  },
+  mobileTabLabel: {
+    fontSize: `${MOBILE_TAB_FONT_SIZE}px`,
   },
   archiveTabButton: {
     backgroundColor: "#FFCC00",
