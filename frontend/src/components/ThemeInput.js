@@ -117,6 +117,14 @@ const ThemeInput = ({
             overflow: hidden;
           }
 
+          .theme-input::placeholder {
+            color: #6b7280;
+          }
+
+          .theme-input:disabled::placeholder {
+            color: #7c8798;
+          }
+
           /* Sparks Animation */
           @keyframes spark {
             from {
@@ -188,7 +196,12 @@ const ThemeInput = ({
           onChange={(e) => setTheme(e.target.value)}
           placeholder="Enter a theme for your book"
           required
-          style={styles.input}
+          disabled={loading}
+          className="theme-input"
+          style={{
+            ...styles.input,
+            ...(loading ? styles.inputDisabled : {}),
+          }}
         />
         <button
           type="submit"
@@ -239,6 +252,13 @@ const styles = {
     fontSize: "16px",
     marginBottom: "10px",
     boxShadow: "rgba(0, 0, 0, 0.25) 1.95px 1.95px 2.6px",
+  },
+  inputDisabled: {
+    backgroundColor: "#E5E7EB",
+    border: "1px solid #B8C0CC",
+    color: "#4B5563",
+    cursor: "not-allowed",
+    opacity: 1,
   },
   generateButton: {
     padding: "10px 20px",
