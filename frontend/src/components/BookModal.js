@@ -7,11 +7,18 @@ const DEFAULT_ILLUSTRATION_ASPECT_RATIO = "4 / 3";
 const buildIllustrationKey = (bookId, pageNumber, illustrationUrl) =>
   `${bookId ?? "unknown-book"}:${pageNumber ?? "unknown-page"}:${illustrationUrl ?? "missing"}`;
 
+const getIllustrationDimensions = (imageElement) => ({
+  width: imageElement?.naturalWidth || 0,
+  height: imageElement?.naturalHeight || 0,
+});
+
 const BookModal = ({ book, onClose }) => {
   const [currentPage, setCurrentPage] = useState(0); // Zero-based index
   const [illustrationStatus, setIllustrationStatus] = useState("loading");
   const [illustrationDimensions, setIllustrationDimensions] = useState(null);
+  const illustrationStatusesRef = useRef(new Map());
   const knownIllustrationDimensionsRef = useRef(new Map());
+  const illustrationImageRef = useRef(null);
   const pages = book?.pages ?? [];
   const hasBook = pages.length > 0;
   const totalPages = pages.length;
@@ -26,6 +33,14 @@ const BookModal = ({ book, onClose }) => {
   useEffect(() => {
     setCurrentPage(0);
   }, [book]);
+
+  useEffect(() => {
+    illustrationStatusesRef.current = new Map();
+    knownIllustrationDimensionsRef.current = new Map();
+    illustrationImageRef.current = null;
+    setIllustrationStatus("loading");
+    setIllustrationDimensions(null);
+  }, [book?.book_id]);
 
   const handleNext = () => {
     if (currentPage < totalPages - 1) {
@@ -44,19 +59,72 @@ const BookModal = ({ book, onClose }) => {
     setCurrentPage(0); // Reset to first page when modal is closed
   };
 
+  const markIllustrationLoaded = (imageElement, nextIllustrationKey, nextPageNumber) => {
+    if (illustrationStatusesRef.current.get(nextIllustrationKey) === "loaded") {
+      return;
+    }
+
+    const nextDimensions = getIllustrationDimensions(imageElement);
+
+    if (nextDimensions.width > 0 && nextDimensions.height > 0) {
+      knownIllustrationDimensionsRef.current.set(nextIllustrationKey, nextDimensions);
+      setIllustrationDimensions(nextDimensions);
+    }
+
+    illustrationStatusesRef.current.set(nextIllustrationKey, "loaded");
+    setIllustrationStatus("loaded");
+    console.debug(`[BookModal] Illustration loaded for page ${nextPageNumber}`);
+  };
+
+  const inspectIllustrationElement = (imageElement, nextIllustrationKey, nextPageNumber) => {
+    if (
+      !imageElement ||
+      illustrationStatusesRef.current.get(nextIllustrationKey) === "error"
+    ) {
+      return;
+    }
+
+    if (imageElement.complete && imageElement.naturalWidth > 0 && imageElement.naturalHeight > 0) {
+      markIllustrationLoaded(imageElement, nextIllustrationKey, nextPageNumber);
+    }
+  };
+
   useEffect(() => {
     const knownDimensions = knownIllustrationDimensionsRef.current.get(illustrationKey) ?? null;
     setIllustrationDimensions(knownDimensions);
 
     if (!illustrationUrl) {
+      illustrationStatusesRef.current.set(illustrationKey, "missing");
       setIllustrationStatus("missing");
       console.debug(`[BookModal] No illustration available for page ${currentPageNumber}`);
       return;
     }
 
+    const knownStatus = illustrationStatusesRef.current.get(illustrationKey);
+    if (knownStatus === "loaded") {
+      setIllustrationStatus("loaded");
+      console.debug(`[BookModal] Reusing loaded illustration for page ${currentPageNumber}`);
+      return;
+    }
+
+    if (knownStatus === "error") {
+      setIllustrationStatus("error");
+      console.debug(`[BookModal] Reusing error state for page ${currentPageNumber}`);
+      return;
+    }
+
+    illustrationStatusesRef.current.set(illustrationKey, "loading");
     setIllustrationStatus("loading");
     console.debug(`[BookModal] Starting illustration transition for page ${currentPageNumber}`);
   }, [currentPageNumber, illustrationKey, illustrationUrl]);
+
+  useEffect(() => {
+    if (!illustrationUrl || illustrationStatus === "loaded" || illustrationStatus === "error") {
+      return;
+    }
+
+    inspectIllustrationElement(illustrationImageRef.current, illustrationKey, currentPageNumber);
+  }, [currentPageNumber, illustrationKey, illustrationStatus, illustrationUrl]);
 
   // Early return if there's no book data
   if (!hasBook) {
@@ -103,6 +171,10 @@ const BookModal = ({ book, onClose }) => {
           {illustrationUrl && illustrationStatus !== "error" ? (
             <img
               key={illustrationKey}
+              ref={(element) => {
+                illustrationImageRef.current = element;
+                inspectIllustrationElement(element, illustrationKey, currentPageNumber);
+              }}
               src={illustrationUrl}
               alt={`Illustration for page ${currentPageNumber}`}
               style={{
@@ -110,21 +182,11 @@ const BookModal = ({ book, onClose }) => {
                 ...(showPlaceholder ? styles.imageHidden : styles.imageVisible),
               }}
               onLoad={(event) => {
-                const nextDimensions = {
-                  width: event.currentTarget.naturalWidth || 0,
-                  height: event.currentTarget.naturalHeight || 0,
-                };
-
-                if (nextDimensions.width > 0 && nextDimensions.height > 0) {
-                  knownIllustrationDimensionsRef.current.set(illustrationKey, nextDimensions);
-                  setIllustrationDimensions(nextDimensions);
-                }
-
-                setIllustrationStatus("loaded");
-                console.debug(`[BookModal] Illustration loaded for page ${currentPageNumber}`);
+                markIllustrationLoaded(event.currentTarget, illustrationKey, currentPageNumber);
               }}
               onError={(event) => {
                 console.error(`Failed to load image for page ${currentPageNumber}`, event);
+                illustrationStatusesRef.current.set(illustrationKey, "error");
                 setIllustrationStatus("error");
                 event.currentTarget.onerror = null;
               }}
