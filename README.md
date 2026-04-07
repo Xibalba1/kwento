@@ -95,6 +95,7 @@ The backend exposes book-focused endpoints under `/books`, including:
 - `GET /books/` to list books
 - `GET /books/{book_id}/` to fetch a single book
 - `GET /books/random/` to fetch a random book
+- `PATCH /books/{book_id}/library-state/` to update a book's library state
 
 ## Notes
 
