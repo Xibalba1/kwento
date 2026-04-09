@@ -2,6 +2,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from pathlib import Path
 import json
+from datetime import datetime, timezone
+import os
 
 from src.utils import general_utils
 
@@ -116,3 +118,29 @@ def test_book_library_state_normalizes_legacy_inconsistent_metadata_on_read(tmp_
 
     assert normalized_state["is_archived"] is True
     assert normalized_state["is_favorite"] is False
+
+
+def test_get_book_by_id_returns_local_created_at(tmp_path, monkeypatch):
+    monkeypatch.setattr(general_utils.settings, "use_cloud_storage", False)
+    monkeypatch.setattr(general_utils.settings, "local_data_path", str(tmp_path / "local_data"))
+
+    book_dir = tmp_path / "local_data" / "book-local-created"
+    book_dir.mkdir(parents=True, exist_ok=True)
+    book_json_path = book_dir / "book-local-created.json"
+    book_json_path.write_text(
+        json.dumps(
+            {
+                "book_id": "book-local-created",
+                "book_title": "Created Locally",
+                "pages": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    created_at = datetime(2026, 4, 9, 12, 0, tzinfo=timezone.utc).timestamp()
+    os.utime(book_json_path, (created_at, created_at))
+
+    book = general_utils.get_book_by_id("book-local-created")
+
+    assert book["created_at"] == "2026-04-09T12:00:00+00:00"

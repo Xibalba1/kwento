@@ -2,10 +2,17 @@
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getImageDebugPageContext, logImageEvent } from "../debug/imageDebug";
-
-const BOOK_SHELF_TAB = "bookshelf";
-const FAVORITES_TAB = "favorites";
-const ARCHIVE_TAB = "archive";
+import {
+  ARCHIVE_TAB,
+  BOOK_SHELF_TAB,
+  DEFAULT_SORTS_BY_TAB,
+  FAVORITES_TAB,
+  SORT_FIELDS,
+  cycleSort,
+  getSortIcon,
+  isSortActive,
+  sortBooks,
+} from "../utils/bookSorting";
 const TAB_WIDTH = 152;
 const TAB_BAR_SIDE_PADDING = 18;
 const TAB_HEIGHT = 52;
@@ -182,21 +189,26 @@ const BookList = ({
   const itemRefs = useRef({});
   const [layoutVersion, setLayoutVersion] = useState(0);
   const [activeTab, setActiveTab] = useState(BOOK_SHELF_TAB);
+  const [sortsByTab, setSortsByTab] = useState(() => ({ ...DEFAULT_SORTS_BY_TAB }));
   const [flippedBookId, setFlippedBookId] = useState(null);
   const prefersReducedMotion = usePrefersReducedMotion();
   const isMobileGrid = useIsMobileGrid();
   const pendingStateBookIds = new Set(pendingLibraryStateBookIds);
-  const visibleBooks = books.filter((book) => {
-    if (activeTab === BOOK_SHELF_TAB) {
-      return !book.is_archived;
-    }
+  const currentSort = sortsByTab[activeTab] ?? DEFAULT_SORTS_BY_TAB[activeTab];
+  const visibleBooks = sortBooks(
+    books.filter((book) => {
+      if (activeTab === BOOK_SHELF_TAB) {
+        return !book.is_archived;
+      }
 
-    if (activeTab === FAVORITES_TAB) {
-      return Boolean(book.is_favorite) && !book.is_archived;
-    }
+      if (activeTab === FAVORITES_TAB) {
+        return Boolean(book.is_favorite) && !book.is_archived;
+      }
 
-    return book.is_archived;
-  });
+      return book.is_archived;
+    }),
+    currentSort,
+  );
 
   useLayoutEffect(() => {
     if (visibleBooks.length === 0) {
@@ -379,6 +391,13 @@ const BookList = ({
     setLayoutVersion((currentVersion) => currentVersion + 1);
   };
 
+  const handleSortToggle = (field) => {
+    setSortsByTab((currentSortsByTab) => ({
+      ...currentSortsByTab,
+      [activeTab]: cycleSort(currentSortsByTab[activeTab], field),
+    }));
+  };
+
   const handleFlipToggle = (event, bookId) => {
     event.stopPropagation();
     setFlippedBookId((currentId) => (currentId === bookId ? null : bookId));
@@ -436,6 +455,27 @@ const BookList = ({
       cardBack: null,
       backTitle: null,
       backActionButton: null,
+    };
+  };
+
+  const getSortPalette = (tab) => {
+    if (tab === ARCHIVE_TAB) {
+      return {
+        segment: styles.archiveSortSegment,
+        active: styles.archiveSortSegmentActive,
+      };
+    }
+
+    if (tab === FAVORITES_TAB) {
+      return {
+        segment: styles.favoritesSortSegment,
+        active: styles.favoritesSortSegmentActive,
+      };
+    }
+
+    return {
+      segment: null,
+      active: null,
     };
   };
 
@@ -740,6 +780,43 @@ const BookList = ({
           ...(getTabStyleSet(activeTab).content ?? {}),
         }}
       >
+        <div
+          style={{
+            ...styles.sortBar,
+            ...(isMobileGrid ? styles.mobileSortBar : {}),
+          }}
+          role="group"
+          aria-label="Sort books"
+        >
+          <button
+            type="button"
+            aria-pressed={isSortActive(currentSort, SORT_FIELDS.TITLE)}
+            style={{
+              ...styles.sortSegment,
+              ...(getSortPalette(activeTab).segment ?? {}),
+              ...(isSortActive(currentSort, SORT_FIELDS.TITLE) ? styles.sortSegmentActive : {}),
+              ...(isSortActive(currentSort, SORT_FIELDS.TITLE) ? (getSortPalette(activeTab).active ?? {}) : {}),
+            }}
+            onClick={() => handleSortToggle(SORT_FIELDS.TITLE)}
+          >
+            <span style={styles.sortSegmentLabel}>Title</span>
+            <span style={styles.materialSymbol}>{getSortIcon(currentSort, SORT_FIELDS.TITLE)}</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={isSortActive(currentSort, SORT_FIELDS.CREATED)}
+            style={{
+              ...styles.sortSegment,
+              ...(getSortPalette(activeTab).segment ?? {}),
+              ...(isSortActive(currentSort, SORT_FIELDS.CREATED) ? styles.sortSegmentActive : {}),
+              ...(isSortActive(currentSort, SORT_FIELDS.CREATED) ? (getSortPalette(activeTab).active ?? {}) : {}),
+            }}
+            onClick={() => handleSortToggle(SORT_FIELDS.CREATED)}
+          >
+            <span style={styles.sortSegmentLabel}>Created</span>
+            <span style={styles.materialSymbol}>{getSortIcon(currentSort, SORT_FIELDS.CREATED)}</span>
+          </button>
+        </div>
         {renderContent()}
       </div>
     </div>
@@ -850,6 +927,61 @@ const styles = {
     boxSizing: "border-box",
     boxShadow:
       "0 18px 28px -16px rgba(0, 0, 0, 0.24), 0 10px 16px -12px rgba(0, 0, 0, 0.16)",
+  },
+  sortBar: {
+    display: "flex",
+    gap: "12px",
+    marginBottom: "20px",
+  },
+  mobileSortBar: {
+    gap: "10px",
+  },
+  sortSegment: {
+    flex: "1 1 0",
+    minWidth: 0,
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(255, 252, 240, 0.32)",
+    borderRadius: "14px",
+    padding: "12px 14px",
+    backgroundColor: "rgba(255, 252, 240, 0.12)",
+    color: "#FFFCF0",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+    fontSize: "15px",
+    fontWeight: "700",
+  },
+  sortSegmentActive: {
+    backgroundColor: "#FFCC00",
+    color: "#8A0033",
+    borderColor: "#FFCC00",
+  },
+  archiveSortSegment: {
+    backgroundColor: "rgba(202, 5, 77, 0.08)",
+    color: "#8A0033",
+    borderColor: "rgba(202, 5, 77, 0.2)",
+  },
+  archiveSortSegmentActive: {
+    backgroundColor: "#36839b",
+    color: "#FFCC00",
+    borderColor: "#36839b",
+  },
+  favoritesSortSegment: {
+    backgroundColor: "rgba(255, 252, 240, 0.14)",
+    color: "#FFFCF0",
+    borderColor: "rgba(255, 252, 240, 0.3)",
+  },
+  favoritesSortSegmentActive: {
+    backgroundColor: "#FFCC00",
+    color: "#36839b",
+    borderColor: "#FFCC00",
+  },
+  sortSegmentLabel: {
+    minWidth: 0,
+    whiteSpace: "nowrap",
   },
   archiveContent: {
     backgroundColor: "#FFCC00",

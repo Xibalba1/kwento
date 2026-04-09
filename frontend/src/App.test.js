@@ -111,6 +111,7 @@ test("renders cached shelf metadata before the background refresh resolves", asy
         {
           book_id: "cached-book-1",
           book_title: "Cached Shelf Book",
+          created_at: "2026-04-08T10:00:00Z",
           cover_url: "https://example.com/cached-cover.png",
           is_archived: false,
         },
@@ -140,6 +141,7 @@ test("renders cached shelf metadata before the background refresh resolves", asy
         {
           book_id: "remote-book-1",
           book_title: "Remote Shelf Book",
+          created_at: "2026-04-09T10:00:00Z",
           is_archived: false,
         },
       ],
@@ -338,6 +340,7 @@ test("clears the theme after a successful generation", async () => {
       json: async () => ({
         book_id: "generated-book-1",
         book_title: "Generated Book",
+        created_at: "2026-04-09T12:00:00Z",
         json_url: "https://example.com/generated-book-1.json",
         cover: {
           url: "https://example.com/generated-book-1-cover.png",
@@ -382,6 +385,63 @@ test("clears the theme after a successful generation", async () => {
 
   await screen.findByRole("button", { name: /close modal/i });
   expect(themeInput).toHaveValue("");
+
+  await waitFor(() => {
+    expect(mockSaveFullBookPackage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        book_id: "generated-book-1",
+        created_at: "2026-04-09T12:00:00Z",
+      }),
+    );
+  });
+});
+
+test("preserves created_at when hydrating and refreshing shelf metadata", async () => {
+  window.localStorage.setItem(
+    "kwento_shelf_metadata_v1",
+    JSON.stringify({
+      version: 1,
+      books: [
+        {
+          book_id: "created-cache-book",
+          book_title: "Created Cache Book",
+          created_at: "2026-04-07T10:00:00Z",
+          is_archived: false,
+        },
+      ],
+      updatedAt: Date.now(),
+      expiresAt: Date.now() + 1000,
+    }),
+  );
+
+  global.fetch.mockResolvedValueOnce({
+    ok: true,
+    json: async () => [
+      {
+        book_id: "created-cache-book",
+        book_title: "Created Cache Book",
+        created_at: "2026-04-08T10:00:00Z",
+        is_archived: false,
+      },
+    ],
+  });
+
+  await act(async () => {
+    render(<App />);
+  });
+
+  expect(screen.getByRole("button", { name: exactName("Created Cache Book") })).toBeInTheDocument();
+
+  await waitFor(() => {
+    expect(mockSaveShelfMetadata).toHaveBeenLastCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          book_id: "created-cache-book",
+          created_at: "2026-04-08T10:00:00Z",
+        }),
+      ]),
+    );
+  });
 });
 
 test("clears the theme after a failed generation request", async () => {

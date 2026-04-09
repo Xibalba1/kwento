@@ -84,6 +84,9 @@ const exactName = (label) => new RegExp(`^${label}$`, "i");
 const mobileGridQuery = "(max-width: 600px)";
 let matchMediaController;
 
+const getRenderedBookTitles = () =>
+  screen.getAllByRole("listitem").map((item) => item.querySelector('button[aria-label]')?.getAttribute("aria-label"));
+
 describe("BookList", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -108,6 +111,25 @@ describe("BookList", () => {
     expect(screen.getByRole("tab", { name: /favorites/i })).toHaveAttribute("aria-selected", "false");
     expect(screen.getByRole("tab", { name: /archive/i })).toHaveAttribute("aria-selected", "false");
     expect(screen.getByRole("button", { name: exactName("Default Shelf Book") })).toBeInTheDocument();
+  });
+
+  test("shows title sorting as active by default", () => {
+    renderBookList([
+      {
+        book_id: "book-b",
+        book_title: "Bravo",
+        is_archived: false,
+      },
+      {
+        book_id: "book-a",
+        book_title: "Alpha",
+        is_archived: false,
+      },
+    ]);
+
+    expect(screen.getByRole("button", { name: /title/i })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /created/i })).toHaveAttribute("aria-pressed", "false");
+    expect(getRenderedBookTitles()).toEqual(["Alpha", "Bravo"]);
   });
 
   test("uses a shared label wrapper and consistent tab height for all tabs", () => {
@@ -280,6 +302,23 @@ describe("BookList", () => {
     expect(list).toHaveStyle({ gridTemplateColumns: "1fr" });
   });
 
+  test("keeps the sort controls inline on mobile", () => {
+    matchMediaController.setMatches(mobileGridQuery, true);
+
+    renderBookList([
+      {
+        book_id: "mobile-sort-book-1",
+        book_title: "Mobile Sort Book 1",
+        is_archived: false,
+      },
+    ]);
+
+    const sortGroup = screen.getByRole("group", { name: /sort books/i });
+    expect(sortGroup).toHaveStyle({ display: "flex" });
+    expect(screen.getByRole("button", { name: /title/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /created/i })).toBeInTheDocument();
+  });
+
   test("updates the grid when the mobile media query changes", () => {
     renderBookList([
       {
@@ -406,6 +445,116 @@ describe("BookList", () => {
     fireEvent.click(screen.getByRole("button", { name: exactName("Clickable Cover") }));
 
     expect(onSelectBook).toHaveBeenCalledWith("book-5");
+  });
+
+  test("cycles title sorting between ascending and descending", () => {
+    renderBookList([
+      {
+        book_id: "book-2",
+        book_title: "Bravo",
+        is_archived: false,
+      },
+      {
+        book_id: "book-1",
+        book_title: "Alpha",
+        is_archived: false,
+      },
+    ]);
+
+    const titleSortButton = screen.getByRole("button", { name: /title/i });
+
+    expect(getRenderedBookTitles()).toEqual(["Alpha", "Bravo"]);
+
+    fireEvent.click(titleSortButton);
+    expect(getRenderedBookTitles()).toEqual(["Bravo", "Alpha"]);
+
+    fireEvent.click(titleSortButton);
+    expect(getRenderedBookTitles()).toEqual(["Alpha", "Bravo"]);
+  });
+
+  test("cycles created sorting and returns to the default title sort", () => {
+    renderBookList([
+      {
+        book_id: "book-2",
+        book_title: "Beta",
+        created_at: "2026-04-09T10:00:00Z",
+        is_archived: false,
+      },
+      {
+        book_id: "book-1",
+        book_title: "Alpha",
+        created_at: "2026-04-08T10:00:00Z",
+        is_archived: false,
+      },
+      {
+        book_id: "book-3",
+        book_title: "Gamma",
+        created_at: "2026-04-10T10:00:00Z",
+        is_archived: false,
+      },
+    ]);
+
+    const createdSortButton = screen.getByRole("button", { name: /created/i });
+    const titleSortButton = screen.getByRole("button", { name: /title/i });
+
+    fireEvent.click(createdSortButton);
+    expect(createdSortButton).toHaveAttribute("aria-pressed", "true");
+    expect(titleSortButton).toHaveAttribute("aria-pressed", "false");
+    expect(getRenderedBookTitles()).toEqual(["Alpha", "Beta", "Gamma"]);
+
+    fireEvent.click(createdSortButton);
+    expect(getRenderedBookTitles()).toEqual(["Gamma", "Beta", "Alpha"]);
+
+    fireEvent.click(createdSortButton);
+    expect(titleSortButton).toHaveAttribute("aria-pressed", "true");
+    expect(createdSortButton).toHaveAttribute("aria-pressed", "false");
+    expect(getRenderedBookTitles()).toEqual(["Alpha", "Beta", "Gamma"]);
+  });
+
+  test("retains sort state independently for each tab during the session", () => {
+    renderBookList([
+      {
+        book_id: "shelf-1",
+        book_title: "Shelf Alpha",
+        created_at: "2026-04-08T10:00:00Z",
+        is_archived: false,
+        is_favorite: false,
+      },
+      {
+        book_id: "shelf-2",
+        book_title: "Shelf Beta",
+        created_at: "2026-04-09T10:00:00Z",
+        is_archived: false,
+        is_favorite: true,
+      },
+      {
+        book_id: "archive-1",
+        book_title: "Archive Older",
+        created_at: "2026-04-07T10:00:00Z",
+        is_archived: true,
+      },
+      {
+        book_id: "archive-2",
+        book_title: "Archive Newer",
+        created_at: "2026-04-10T10:00:00Z",
+        is_archived: true,
+      },
+    ]);
+
+    const createdSortButton = screen.getByRole("button", { name: /created/i });
+
+    fireEvent.click(createdSortButton);
+    fireEvent.click(createdSortButton);
+    expect(getRenderedBookTitles()).toEqual(["Shelf Beta", "Shelf Alpha"]);
+
+    fireEvent.click(screen.getByRole("tab", { name: /archive/i }));
+    expect(getRenderedBookTitles()).toEqual(["Archive Newer", "Archive Older"]);
+
+    fireEvent.click(createdSortButton);
+    expect(getRenderedBookTitles()).toEqual(["Archive Older", "Archive Newer"]);
+
+    fireEvent.click(screen.getByRole("tab", { name: /book shelf/i }));
+    expect(getRenderedBookTitles()).toEqual(["Shelf Beta", "Shelf Alpha"]);
   });
 
   test("archives from the card action without selecting the book", () => {

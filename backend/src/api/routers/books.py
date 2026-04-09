@@ -89,6 +89,7 @@ async def create_book(book_request: BookCreateRequest):
         response = BookResponse(
             book_id=str(book.book_id),
             book_title=book.book_title,
+            created_at=datetime.now(timezone.utc),
             expires_at=expires_at,
             json_url=json_url,
             is_archived=False,
