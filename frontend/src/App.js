@@ -15,7 +15,6 @@ import {
   saveShelfMetadata,
 } from "./cache/libraryCache";
 import { getImageDebugPageContext, logImageEvent } from "./debug/imageDebug";
-
 const releaseObjectUrls = (urls = []) => {
   if (typeof URL?.revokeObjectURL !== "function") {
     return;
@@ -27,9 +26,6 @@ const releaseObjectUrls = (urls = []) => {
     }
   });
 };
-
-const sortBooksByTitle = (books = []) =>
-  [...books].sort((left, right) => left.book_title.localeCompare(right.book_title));
 
 const areBookIdListsEqual = (left = [], right = []) =>
   left.length === right.length && left.every((value, index) => value === right[index]);
@@ -50,6 +46,7 @@ const normalizeBook = (bookData = {}) => ({
   ...bookData,
   book_id: bookData.book_id,
   book_title: bookData.book_title,
+  created_at: bookData.created_at ?? null,
   json_url: bookData.json_url,
   remote_cover_url: bookData.remote_cover_url ?? bookData.cover_url ?? bookData.cover?.url ?? null,
   remote_cover_expires_at:
@@ -209,10 +206,10 @@ const App = () => {
       if (existingIndex >= 0) {
         const nextBooks = [...previousBooks];
         nextBooks[existingIndex] = { ...nextBooks[existingIndex], ...normalizedBook };
-        return sortBooksByTitle(nextBooks);
+        return nextBooks;
       }
 
-      return sortBooksByTitle([normalizedBook, ...previousBooks]);
+      return [normalizedBook, ...previousBooks];
     });
   };
 
@@ -239,9 +236,7 @@ const App = () => {
         }
 
         const books = await response.json();
-        const normalizedBooks = Array.isArray(books)
-          ? sortBooksByTitle(books.map((entry) => normalizeBook(entry)))
-          : [];
+        const normalizedBooks = Array.isArray(books) ? books.map((entry) => normalizeBook(entry)) : [];
         setLibraryBooks(normalizedBooks);
         await Promise.all(
           normalizedBooks.map((bookEntry) => {
@@ -310,7 +305,7 @@ const App = () => {
     logImageEvent("app:mount", getImageDebugPageContext());
     const cachedMetadata = loadShelfMetadataSync();
     if (cachedMetadata?.books?.length) {
-      setLibraryBooks(sortBooksByTitle(cachedMetadata.books.map((entry) => normalizeBook(entry))));
+      setLibraryBooks(cachedMetadata.books.map((entry) => normalizeBook(entry)));
       logImageEvent("shelf:metadata_hydrated", {
         count: cachedMetadata.books.length,
       });
@@ -563,10 +558,8 @@ const App = () => {
     const optimisticBook = previousBook ? normalizeBook(applyLibraryStateRules(previousBook, updates)) : null;
 
     setLibraryBooks((currentBooks) =>
-      sortBooksByTitle(
-        currentBooks.map((entry) =>
-          entry.book_id === bookId ? normalizeBook(applyLibraryStateRules(entry, updates)) : entry,
-        ),
+      currentBooks.map((entry) =>
+        entry.book_id === bookId ? normalizeBook(applyLibraryStateRules(entry, updates)) : entry,
       ),
     );
     setBook((currentBook) =>
@@ -588,11 +581,7 @@ const App = () => {
 
       const updatedBook = normalizeBook(await response.json());
       setLibraryBooks((currentBooks) =>
-        sortBooksByTitle(
-          currentBooks.map((entry) =>
-            entry.book_id === bookId ? { ...entry, ...updatedBook } : entry,
-          ),
-        ),
+        currentBooks.map((entry) => (entry.book_id === bookId ? { ...entry, ...updatedBook } : entry)),
       );
       setBook((currentBook) =>
           currentBook?.book_id === bookId
@@ -603,11 +592,7 @@ const App = () => {
       console.error(`Failed to update library state for book ${bookId}:`, error);
       if (previousBook) {
         setLibraryBooks((currentBooks) =>
-          sortBooksByTitle(
-            currentBooks.map((entry) =>
-              entry.book_id === bookId ? { ...entry, ...previousBook } : entry,
-            ),
-          ),
+          currentBooks.map((entry) => (entry.book_id === bookId ? { ...entry, ...previousBook } : entry)),
         );
         setBook((currentBook) =>
           currentBook?.book_id === bookId

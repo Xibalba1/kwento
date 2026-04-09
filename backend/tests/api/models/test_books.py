@@ -39,6 +39,7 @@ async def test_create_book(mock_generate_book):
     assert response.status_code == 200
     data = response.json()
     assert data["book_title"] == "The Adventures of Testy McTestface"
+    assert "created_at" in data
     assert len(data["images"]) == 2
     assert data["images"][0]["page"] == 1
     assert data["images"][0]["url"] == "http://example.com/image1.png"

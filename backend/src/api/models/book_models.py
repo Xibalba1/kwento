@@ -196,6 +196,7 @@ class CoverResponse(BaseModel):
 class BookResponse(BaseModel):
     book_id: str
     book_title: str
+    created_at: Optional[datetime] = None
     expires_at: datetime  # Expiration timestamp for the JSON URL
     json_url: str  # Pre-signed URL for the book's JSON metadata
     cover: Optional[CoverResponse] = None

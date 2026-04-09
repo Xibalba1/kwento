@@ -51,6 +51,49 @@ _GCS_CLIENT_LOCK = threading.Lock()
 BOOK_METADATA_FILENAME = "metadata.json"
 
 
+def _serialize_datetime(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+
+    return value.isoformat()
+
+
+def _get_blob_created_at(blob) -> str | None:
+    try:
+        created_at = getattr(blob, "time_created", None)
+        if created_at is None:
+            return None
+        return _serialize_datetime(created_at)
+    except Exception as e:
+        logger.warning(
+            "Failed to serialize blob created_at for blob=%s: %s",
+            getattr(blob, "name", None),
+            e,
+        )
+        return None
+
+
+def _get_path_created_at(path: Path) -> str | None:
+    try:
+        stat_result = path.stat()
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        logger.warning("Failed to read created_at for path=%s: %s", path, e)
+        return None
+
+    try:
+        created_at = datetime.fromtimestamp(stat_result.st_mtime, tz=timezone.utc)
+    except Exception as e:
+        logger.warning("Failed to parse created_at for path=%s: %s", path, e)
+        return None
+
+    return _serialize_datetime(created_at)
+
+
 def get_project_root() -> Path:
     """
     Determines the project root by navigating up the directory tree until it finds
@@ -555,6 +598,7 @@ def get_book_list() -> List[Dict[str, Any]]:
                     metadata = blob.metadata or {}
                     if metadata.get("artifact_type") not in {None, "book_json"}:
                         continue
+                    created_at = _get_blob_created_at(blob)
                     book_id = metadata.get("book_id")
                     book_title = metadata.get("book_title")
                     logger.debug(
@@ -570,6 +614,7 @@ def get_book_list() -> List[Dict[str, Any]]:
                             books_dict[book_id] = {
                                 "book_id": book_id,
                                 "book_title": book_title,
+                                "created_at": created_at,
                                 "json_url": json_url,
                                 "expires_at": expires_at,
                                 "cover_url": None,
@@ -586,6 +631,7 @@ def get_book_list() -> List[Dict[str, Any]]:
                             # Update json_url and book_title if needed
                             books_dict[book_id]["json_url"] = json_url
                             books_dict[book_id]["book_title"] = book_title
+                            books_dict[book_id]["created_at"] = created_at
                             books_dict[book_id]["is_archived"] = library_state_by_book_id.get(
                                 book_id, {}
                             ).get("is_archived", books_dict[book_id].get("is_archived", False))
@@ -606,6 +652,7 @@ def get_book_list() -> List[Dict[str, Any]]:
                             books_dict[book_id] = {
                                 "book_id": book_id,
                                 "book_title": "",
+                                "created_at": None,
                                 "json_url": "",
                                 "expires_at": expires_at,
                                 "cover_url": cover_url,
@@ -640,6 +687,7 @@ def get_book_list() -> List[Dict[str, Any]]:
                             books_dict[book_id] = {
                                 "book_id": book_id,
                                 "book_title": "",  # Will be updated when JSON is processed
+                                "created_at": None,
                                 "json_url": "",  # Will be updated when JSON is processed
                                 "expires_at": expires_at,
                                 "cover_url": None,
@@ -729,6 +777,7 @@ def get_book_list() -> List[Dict[str, Any]]:
                     {
                         "book_id": str(book_data["book_id"]),
                         "book_title": book_data["book_title"],
+                        "created_at": _get_path_created_at(book_json_path),
                         "json_url": str(book_json_path.resolve()),
                         "expires_at": datetime.now(timezone.utc) + expiration_time,
                         "cover_url": (
@@ -805,6 +854,7 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
             book_blob.reload()
             metadata = book_blob.metadata or {}
             book_title = metadata.get("book_title", "Unknown Title")
+            created_at = _get_blob_created_at(book_blob)
             logger.debug(
                 f"get_book_by_id(): `book_blob` reloaded. `metadata` set. `book_title` set."
             )
@@ -835,6 +885,7 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
             return {
                 "book_id": book_id,
                 "book_title": book_title,
+                "created_at": created_at,
                 "json_url": json_url,
                 "expires_at": expires_at,
                 "cover": cover,
@@ -894,6 +945,7 @@ def get_book_by_id(book_id: str) -> Dict[str, Any]:
             return {
                 "book_id": book_id,
                 "book_title": book_title,
+                "created_at": _get_path_created_at(book_json_path),
                 "json_url": str(book_json_path.resolve()),  # Local path
                 "expires_at": expires_at,
                 "cover": cover,

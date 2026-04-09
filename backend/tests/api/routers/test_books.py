@@ -15,6 +15,52 @@ def _test_client() -> AsyncClient:
 
 
 @pytest.mark.asyncio
+@patch("src.api.routers.books.get_book_list")
+async def test_list_books_includes_created_at(mock_get_book_list):
+    mock_get_book_list.return_value = [
+        {
+            "book_id": "book-list-1",
+            "book_title": "List Book",
+            "created_at": "2026-04-02T00:00:00Z",
+            "json_url": "https://example.com/book-list-1.json",
+            "expires_at": "2026-04-02T00:00:00Z",
+            "cover": None,
+            "images": [],
+            "is_archived": False,
+            "is_favorite": False,
+        }
+    ]
+
+    async with _test_client() as client:
+        response = await client.get("/books/")
+
+    assert response.status_code == 200
+    assert response.json()[0]["created_at"] == "2026-04-02T00:00:00Z"
+
+
+@pytest.mark.asyncio
+@patch("src.api.routers.books.get_book_by_id")
+async def test_fetch_book_by_id_includes_created_at(mock_get_book_by_id):
+    mock_get_book_by_id.return_value = {
+        "book_id": "book-detail-1",
+        "book_title": "Detail Book",
+        "created_at": "2026-04-02T00:00:00Z",
+        "json_url": "https://example.com/book-detail-1.json",
+        "expires_at": "2026-04-02T00:00:00Z",
+        "cover": None,
+        "images": [],
+        "is_archived": False,
+        "is_favorite": False,
+    }
+
+    async with _test_client() as client:
+        response = await client.get("/books/book-detail-1/")
+
+    assert response.status_code == 200
+    assert response.json()["created_at"] == "2026-04-02T00:00:00Z"
+
+
+@pytest.mark.asyncio
 @patch("src.api.routers.books.content_generation.generate_book")
 async def test_create_book_story_timeout_returns_504(mock_generate_book):
     mock_generate_book.side_effect = StoryGenerationTimeoutError(
@@ -77,6 +123,7 @@ async def test_patch_library_state_updates_archive_state(
         {
             "book_id": "book-1",
             "book_title": "Archive Book",
+            "created_at": "2026-04-02T00:00:00Z",
             "json_url": "https://example.com/book-1.json",
             "expires_at": "2026-04-02T00:00:00Z",
             "cover": None,
@@ -87,6 +134,7 @@ async def test_patch_library_state_updates_archive_state(
         {
             "book_id": "book-1",
             "book_title": "Archive Book",
+            "created_at": "2026-04-02T00:00:00Z",
             "json_url": "https://example.com/book-1.json",
             "expires_at": "2026-04-02T00:00:00Z",
             "cover": None,
@@ -101,6 +149,7 @@ async def test_patch_library_state_updates_archive_state(
 
     assert response.status_code == 200
     assert response.json()["is_archived"] is True
+    assert response.json()["created_at"] == "2026-04-02T00:00:00Z"
     mock_save_book_library_state.assert_called_once_with("book-1", is_archived=True, is_favorite=None)
 
 
@@ -127,6 +176,7 @@ async def test_patch_library_state_updates_favorite_state(
         {
             "book_id": "book-2",
             "book_title": "Favorite Book",
+            "created_at": "2026-04-02T00:00:00Z",
             "json_url": "https://example.com/book-2.json",
             "expires_at": "2026-04-02T00:00:00Z",
             "cover": None,
@@ -137,6 +187,7 @@ async def test_patch_library_state_updates_favorite_state(
         {
             "book_id": "book-2",
             "book_title": "Favorite Book",
+            "created_at": "2026-04-02T00:00:00Z",
             "json_url": "https://example.com/book-2.json",
             "expires_at": "2026-04-02T00:00:00Z",
             "cover": None,
@@ -151,6 +202,7 @@ async def test_patch_library_state_updates_favorite_state(
 
     assert response.status_code == 200
     assert response.json()["is_favorite"] is True
+    assert response.json()["created_at"] == "2026-04-02T00:00:00Z"
     mock_save_book_library_state.assert_called_once_with("book-2", is_archived=None, is_favorite=True)
 
 
@@ -165,6 +217,7 @@ async def test_patch_library_state_restores_archived_favorite_book(
         {
             "book_id": "book-3",
             "book_title": "Archived Favorite Book",
+            "created_at": "2026-04-02T00:00:00Z",
             "json_url": "https://example.com/book-3.json",
             "expires_at": "2026-04-02T00:00:00Z",
             "cover": None,
@@ -175,6 +228,7 @@ async def test_patch_library_state_restores_archived_favorite_book(
         {
             "book_id": "book-3",
             "book_title": "Archived Favorite Book",
+            "created_at": "2026-04-02T00:00:00Z",
             "json_url": "https://example.com/book-3.json",
             "expires_at": "2026-04-02T00:00:00Z",
             "cover": None,
@@ -190,4 +244,5 @@ async def test_patch_library_state_restores_archived_favorite_book(
     assert response.status_code == 200
     assert response.json()["is_archived"] is False
     assert response.json()["is_favorite"] is True
+    assert response.json()["created_at"] == "2026-04-02T00:00:00Z"
     mock_save_book_library_state.assert_called_once_with("book-3", is_archived=None, is_favorite=True)
